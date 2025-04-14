@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=64.0", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+
+[project]
+name = "genlm-eval"
+version = "0.1.0"
+description = "Evaluation framework for language models"
+authors = []
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "pydantic",
+    "numpy",
+    "genlm-control>=0.2.0",
+    "pandas",
+]
+
+[project.optional-dependencies]
+pattern_matching = [
+    "regex",
+]
+
+spider = [
+    "jsons",
+    "lark",
+    "rapidfuzz",
+]
+
+test = [
+    "coverage",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-mock",
+]
+
+[tool.setuptools.packages.find]
+include = ["genlm", "genlm/eval"]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
+asyncio_mode = "auto"
