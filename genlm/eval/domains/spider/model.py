@@ -22,7 +22,6 @@ Please write me a SQL statement that answers the following question: {utterance}
 
 Remember, DO NOT provide any commentary or explanation of what the code does, just the SQL statement ending in a semicolon."""
 
-
     def __init__(self, *, grammar_dir=None, **kwargs):
         if grammar_dir is None:
             self.grammar_dir = os.path.join(os.path.dirname(__file__), "grammars")
@@ -49,12 +48,12 @@ Remember, DO NOT provide any commentary or explanation of what the code does, ju
         ]
         return self.llm.model.tokenizer.apply_chat_template(
             self.chat_template_formatter(
-                self.system_prompt, 
+                self.system_prompt,
                 few_shot_examples,
                 self.user_message_template.format(
                     schema_str=instance.schema_str,
                     utterance=instance.utterance,
-                )
+                ),
             ),
             tokenize=True,
             add_generation_prompt=True,

@@ -162,7 +162,7 @@ class ControlModelAdaptor(ModelAdaptor):
             runtime_seconds=runtime,
             metadata=self.metadata(),
         )
-    
+
     def metadata(self):
         return {
             "model_name": self.model_name,

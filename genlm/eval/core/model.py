@@ -18,7 +18,7 @@ class ModelResponse:
             "prob": self.prob,
             "metadata": metadata,
         }
-    
+
     @classmethod
     def from_dict(cls, d):
         return cls(
@@ -46,7 +46,7 @@ class ModelOutput:
             "runtime_seconds": self.runtime_seconds,
             "metadata": metadata,
         }
-    
+
     @classmethod
     def from_dict(cls, d):
         return cls(
