@@ -13,6 +13,8 @@ class SpiderTableColumnVerifier(Potential):
         self.tables = tables
         self.verbosity = verbosity
 
+        super().__init__(list(range(256)))
+
     @lru_cache(maxsize=None)
     def _parse(self, query):
         return self.parser.parse(query)
@@ -45,7 +47,7 @@ class SpiderTableColumnVerifier(Potential):
 
     async def prefix(self, context):
         try:
-            context = b"".join(context).decode("utf-8")
+            context = bytes(context).decode("utf-8")
         except UnicodeDecodeError:
             return 0
 
@@ -74,7 +76,7 @@ class SpiderTableColumnVerifier(Potential):
 
     async def complete(self, context):
         try:
-            context = b"".join(context).decode("utf-8")
+            context = bytes(context).decode("utf-8")
         except UnicodeDecodeError:
             return float("-inf")
 

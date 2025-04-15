@@ -1,14 +1,16 @@
 import os
 import json
+from genlm.eval.core.model import ModelOutput
 
 
 async def run_evaluation(
     dataset,
     model,
     evaluator,
-    results_dir=None,
+    output_dir=None,
     n_replicates=1,
-    overwrite=False,
+    overwrite_results=False,
+    overwrite_output=False,
     verbosity=0,
 ):
     """Run evaluation on a dataset using the provided model and evaluator.
@@ -17,9 +19,10 @@ async def run_evaluation(
         dataset (Dataset): The dataset to evaluate on.
         model_adaptor (ModelAdaptor): The model adaptor to use for generation.
         evaluator (Evaluator): The evaluator to use for prompt generation and evaluation.
-        results_dir (str, optional): The directory to save the results. Defaults to None, in which case results are not saved.
+        output_dir (str, optional): The directory to save the results. Defaults to None, in which case results are not saved.
         n_replicates (int, optional): Number of times to replicate the evaluation. Defaults to 1.
-        overwrite (bool, optional): Whether to overwrite existing results. Defaults to False.
+        overwrite_results (bool, optional): Whether to overwrite existing evaluation results. Defaults to False.
+        overwrite_output (bool, optional): Whether to overwrite existing output. Defaults to False.
         verbosity (int, optional): The verbosity of the evaluation. Defaults to 0, which is silent.
 
     Returns:
@@ -29,38 +32,62 @@ async def run_evaluation(
     all_instance_results = []
     all_instance_outputs = []
 
+    if overwrite_output and not overwrite_results:
+        raise ValueError("Cannot overwrite output without overwriting results")
+    
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
     for instance in dataset:
         instance_results = []
         instance_outputs = []
+        
         for i in range(n_replicates):
-            if results_dir is not None:
-                instance_results_path = os.path.join(
-                    results_dir, f"{instance.id}-{i}-results.json"
-                )
-                record_path = os.path.join(
-                    results_dir, f"{instance.id}-{i}-record.json"
-                )
-            else:
-                instance_results_path = None
-                record_path = None
+            output = None
+            result = None
 
-            if (
-                instance_results_path
-                and not overwrite
-                and os.path.exists(instance_results_path)
-            ):
-                result = json.load(open(instance_results_path, "r"))
-            else:
+            if output_dir is not None:
+                record_path = os.path.join(
+                    output_dir, f"{instance.id}-{i}-record.json"
+                )
+                instance_output_path = os.path.join(
+                    output_dir, f"{instance.id}-{i}-output.json"
+                )
+                instance_results_path = os.path.join(
+                    output_dir, f"{instance.id}-{i}-results.json"
+                )
+
+                if (
+                    not overwrite_output
+                    and os.path.exists(instance_output_path)
+                ):
+                    try:
+                        output = ModelOutput.from_dict(json.load(open(instance_output_path, "r")))
+                    except json.JSONDecodeError:
+                        pass
+
+                if (
+                    not overwrite_results
+                    and os.path.exists(instance_results_path)
+                ):
+                    try:
+                        result = json.load(open(instance_results_path, "r"))
+                    except json.JSONDecodeError:
+                        pass
+            
+            if output is None:
                 output = await model.generate(instance, record_path)
+
+                if output_dir:
+                    with open(instance_output_path, "w") as f:
+                        json.dump(output.to_dict(), f, indent=4)
+
+            if result is None or overwrite_results:
                 result = evaluator.evaluate_ensemble(instance, output)
 
-                if instance_results_path:
+                if output_dir:
                     with open(instance_results_path, "w") as f:
-                        json.dump(result, f)
-                    with open(
-                        os.path.join(results_dir, f"{instance.id}-{i}-output.json"), "w"
-                    ) as f:
-                        json.dump(output, f)
+                        json.dump(result, f, indent=4)
 
             instance_results.append(result)
             instance_outputs.append(output)
@@ -77,7 +104,6 @@ async def run_evaluation(
         all_instance_outputs.append(instance_outputs)
 
         if verbosity > 0:
-            print()
             print(f"Instance {instance}")
             print(
                 f"Mean weighted accuracy (instance): {avg_instance_result['weighted_accuracy']}"
@@ -85,14 +111,12 @@ async def run_evaluation(
             print(
                 f"Mean weighted accuracy (total): {sum(r['weighted_accuracy'] for r in all_results) / len(all_results)}"
             )
+            print()
 
-    n_instances = len(all_results)
     return {
-        "average_weighted_accuracy": sum(r["weighted_accuracy"] for r in all_results)
-        / n_instances,
-        "average_num_correct": sum(r["num_correct"] for r in all_results) / n_instances,
-        "average_num_valid": sum(r["num_valid"] for r in all_results) / n_instances,
-        "n_instances": n_instances,
+        "average_weighted_accuracy": sum(r["weighted_accuracy"] for r in all_results) / len(all_results),
+        "average_num_valid": sum(r["num_valid"] for r in all_results) / len(all_results),
+        "n_instances": len(all_results),
         "all_instance_results": all_instance_results,
         "all_instance_outputs": all_instance_outputs,
     }

@@ -1,5 +1,6 @@
 import time
 import numpy as np
+from functools import cached_property
 from collections import OrderedDict
 from genlm.control import PromptedLLM
 from genlm.control.constant import EndOfSequence
@@ -35,12 +36,16 @@ class ControlModelAdaptor(ModelAdaptor):
         self.n_particles = n_particles
         self.ess_threshold = ess_threshold
         self.lm_args = lm_args or {}
-        self.llm = self.make_llm(model_name, lm_args)
 
         self.sampler_cache_size = sampler_cache_size
         self.critic_cache_size = critic_cache_size
         self._sampler_cache = OrderedDict()
         self._critic_cache = OrderedDict()
+
+    @cached_property
+    def llm(self):
+        # Only create the LLM if needed
+        return self.make_llm(self.model_name, self.lm_args)
 
     def make_llm(self, model_name, lm_args):
         return PromptedLLM.from_name(model_name, **lm_args)
@@ -140,13 +145,24 @@ class ControlModelAdaptor(ModelAdaptor):
             try:
                 text = b"".join(sequence).decode("utf-8")
                 responses.append(
-                    ModelResponse(text=text, prob=prob, metadata={"context": sequence})
+                    ModelResponse(
+                        text=text,
+                        prob=prob,
+                        metadata={
+                            # Convert bytes into a json-serializable format
+                            "context": repr(sequence),
+                        },
+                    )
                 )
             except UnicodeDecodeError:
                 continue
 
-        return ModelOutput(responses=responses, runtime_seconds=runtime)
-
+        return ModelOutput(
+            responses=responses,
+            runtime_seconds=runtime,
+            metadata=self.metadata(),
+        )
+    
     def metadata(self):
         return {
             "model_name": self.model_name,

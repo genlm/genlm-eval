@@ -12,11 +12,20 @@ class ModelResponse:
     metadata: Optional[Dict[str, Any]] = None
 
     def to_dict(self):
+        metadata = self.metadata if self.metadata is not None else {}
         return {
             "text": self.text,
             "prob": self.prob,
-            "metadata": self.metadata,
+            "metadata": metadata,
         }
+    
+    @classmethod
+    def from_dict(cls, d):
+        return cls(
+            text=d["text"],
+            prob=d["prob"],
+            metadata=d["metadata"],
+        )
 
     def __repr__(self):
         return f"ModelResponse(\n\ttext={self.text},\n\tprob={self.prob},\n\tmetadata={self.metadata}\n)"
@@ -31,11 +40,20 @@ class ModelOutput:
     metadata: Optional[Dict[str, Any]] = None
 
     def to_dict(self):
+        metadata = self.metadata if self.metadata is not None else {}
         return {
             "responses": [r.to_dict() for r in self.responses],
             "runtime_seconds": self.runtime_seconds,
-            "metadata": self.metadata,
+            "metadata": metadata,
         }
+    
+    @classmethod
+    def from_dict(cls, d):
+        return cls(
+            responses=[ModelResponse.from_dict(r) for r in d["responses"]],
+            runtime_seconds=d["runtime_seconds"],
+            metadata=d["metadata"],
+        )
 
     def __repr__(self):
         return f"ModelOutput(\n\truntime_seconds={self.runtime_seconds},\n\tresponses={self.responses},\n\tmetadata={self.metadata}\n)"
@@ -52,7 +70,7 @@ class ModelAdaptor(ABC):
             instance: The input instance to send to the model.
 
         Returns:
-            ModelOutput: Container with weighted responses and metadata.
+            ModelOutput: Container with weighted ensemble responses and metadata.
         """
         pass
 

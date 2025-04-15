@@ -15,12 +15,13 @@ class SpiderInstance(BaseModel):
     utterance: str
     schema_name: str
     gold: str
-    query_id: int
-    schema: str
+    id: int
+    schema_str: str
     few_shot_examples: List[tuple]
+    tables: List
 
     def __str__(self):
-        return f"utterance: {self.utterance}, schema_name: {self.schema_name} (id: {self.query_id})"
+        return f"utterance: {self.utterance}, schema_name: {self.schema_name} (id: {self.id})"
 
 
 class SpiderDataset(Dataset[SpiderInstance]):
@@ -37,6 +38,7 @@ class SpiderDataset(Dataset[SpiderInstance]):
                 (
                     serialize_schema(self.spider_schemas[train_datum.schema_name]),
                     train_datum.utterance,
+                    train_datum.query,
                 )
             )
 
@@ -55,11 +57,12 @@ class SpiderDataset(Dataset[SpiderInstance]):
         for instance_id, dev_datum in enumerate(self.dev_data):
             yield SpiderInstance(
                 schema_name=dev_datum.schema_name,
-                schema=serialize_schema(self.spider_schemas[dev_datum.schema_name]),
+                schema_str=serialize_schema(self.spider_schemas[dev_datum.schema_name]),
                 utterance=dev_datum.utterance,
                 gold=dev_datum.query,
-                query_id=instance_id,
+                id=instance_id,
                 few_shot_examples=self.few_shot_examples,
+                tables=self.spider_schemas[dev_datum.schema_name].tables,
             )
 
     @property

@@ -49,8 +49,8 @@ class Evaluator(Generic[T], ABC):
             else:
                 incorrect_responses.append(response)
 
-        correct_weight = sum(r.weight for r in correct_responses)
-        total_weight = sum(r.weight for r in output.responses)
+        correct_weight = sum(r.prob for r in correct_responses)
+        total_weight = sum(r.prob for r in output.responses)
         num_valid = len(output.responses)
 
         return {

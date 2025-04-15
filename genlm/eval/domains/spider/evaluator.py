@@ -18,4 +18,4 @@ class SpiderEvaluator(Evaluator[SpiderInstance]):
         return self.evaluator.evaluate(x, y, db_name=db)
 
     def evaluate_response(self, instance, response):
-        return self.cached_eval(response, instance.gold, instance.schema_name)
+        return self.cached_eval(response, instance.gold, instance.schema_name)[0]
