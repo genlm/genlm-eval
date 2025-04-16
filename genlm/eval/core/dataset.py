@@ -1,8 +1,15 @@
 from abc import ABC, abstractmethod
-from typing import Iterator, TypeVar, Generic
+from typing import Iterator, TypeVar, Generic, Union
 from pydantic import BaseModel
 
-T = TypeVar("T", bound=BaseModel)
+
+class Instance(BaseModel):
+    """Base class for dataset instances that conform to a Pydantic schema."""
+
+    instance_id: Union[int, str]
+
+
+T = TypeVar("T", bound=Instance)
 
 
 class Dataset(Generic[T], ABC):

@@ -8,7 +8,7 @@ from genlm.eval.core import ModelAdaptor, ModelOutput, ModelResponse
 
 
 class ControlModelAdaptor(ModelAdaptor):
-    """Model adaptor for controlled LLM generation."""
+    """Adaptor for genlm-control models."""
 
     def __init__(
         self,
@@ -44,22 +44,15 @@ class ControlModelAdaptor(ModelAdaptor):
 
     @cached_property
     def llm(self):
-        # Only create the LLM if needed
+        """Lazily initialize and return the language model.
+
+        Returns:
+            (PromptedLLM): The initialized language model instance.
+        """
         return self.make_llm(self.model_name, self.lm_args)
 
-    def make_llm(self, model_name, lm_args):
-        return PromptedLLM.from_name(model_name, **lm_args)
-
-    def get_sampler_cache_key(self, instance):
-        """Get cache key for sampler. Override this method to customize the cache key."""
-        return str(instance)
-
-    def get_critic_cache_key(self, instance):
-        """Get cache key for critic. Override this method to customize the cache key."""
-        return str(instance)
-
     def fetch_or_create_sampler(self, instance):
-        """Fetch or create the sampler for the model with caching support."""
+        """Fetch or create the sampler for the model with LRU caching support."""
         if self.sampler_cache_size == 0:
             return self.make_sampler(instance)
 
@@ -75,7 +68,7 @@ class ControlModelAdaptor(ModelAdaptor):
         return sampler
 
     def fetch_or_create_critic(self, instance):
-        """Fetch or create the critic for the model with caching support."""
+        """Fetch or create the critic for the model with LRU caching support."""
         if self.critic_cache_size == 0:
             return self.make_critic(instance)
 
@@ -90,16 +83,88 @@ class ControlModelAdaptor(ModelAdaptor):
         self._critic_cache[cache_key] = critic
         return critic
 
+    def make_llm(self, model_name, lm_args):
+        """Create a new PromptedLLM instance.
+
+        Override this method to customize the language model configuration.
+
+        Args:
+            model_name (str): Name of the model to initialize
+            lm_args (dict): Additional arguments for model initialization
+
+        Returns:
+            PromptedLLM: The initialized language model
+        """
+        return PromptedLLM.from_name(model_name, **lm_args)
+
+    def get_sampler_cache_key(self, instance):
+        """Generate a cache key for the sampler instances.
+
+        Override this method to provide custom cache keys.
+
+        Args:
+            instance: The dataset instance to generate a cache key for
+
+        Returns:
+            str: A unique cache key for the instance
+        """
+        return str(instance)
+
+    def get_critic_cache_key(self, instance):
+        """Generate a cache key for the critic instances.
+
+        Override this method to provide custom cache keys.
+
+        Args:
+            instance: The dataset instance to generate a cache key for
+
+        Returns:
+            str: A unique cache key for the instance
+        """
+        return str(instance)
+
     def make_sampler(self, instance):
-        """Make the sampler for the model."""
-        raise NotImplementedError("Subclass must implement this method")
+        """Create a `genlm.control.TokenSampler` instance given a dataset instance.
+
+        This abstract method should be implemented by subclasses to create
+        a sampler appropriate for the provided instance.
+
+        Args:
+            instance: The dataset instance
+
+        Returns:
+            (genlm.control.TokenSampler): A sampler instance configured for the model
+        """
+        raise NotImplementedError("Subclasses must implement `make_sampler`")
 
     def make_critic(self, instance):
-        """Make the critic for the model."""
-        raise NotImplementedError("Subclass must implement this method")
+        """Create a `genlm.control.Potential` instance given a dataset instance.
+
+        This abstract method should be implemented by subclasses to create
+        a potential appropriate for the provided instance. If no critic is needed, return None.
+
+        Args:
+            instance: The dataset instance
+
+        Returns:
+            (genlm.control.Potential): A potential instance configured for the model, or None if no critic is needed
+        """
+        raise NotImplementedError("Subclasses must implement `make_critic`")
 
     def make_prompt_ids(self, instance):
-        raise NotImplementedError("Subclass must implement this method")
+        """Create prompt token IDs for the model.
+
+        This abstract method should be implemented by subclasses to convert
+        the input instance into token IDs that can be used to prompt the
+        language model before generation.
+
+        Args:
+            instance: The dataset instance
+
+        Returns:
+            List[int]: A list of token IDs representing the prompt
+        """
+        raise NotImplementedError("Subclasses must implement `make_prompt_ids`")
 
     def chat_template_formatter(self, system_prompt, few_shot_examples, query):
         messages = [{"role": "system", "content": system_prompt}]
@@ -109,11 +174,12 @@ class ControlModelAdaptor(ModelAdaptor):
         messages.append({"role": "user", "content": query})
         return messages
 
-    async def generate(self, instance, record_path):
+    async def generate(self, instance, record_path=None):
         """Asynchronous generation method.
 
         Args:
-            instance: The instance to generate examples for.
+            instance: The dataset instance.
+            record_path: The path to save a record of the inference run.
 
         Returns:
             ModelOutput: The generated responses and metadata.
@@ -133,9 +199,10 @@ class ControlModelAdaptor(ModelAdaptor):
         runtime = time.time() - start_time
 
         responses = []
+        # TODO: maybe this should be decoded_posterior?
         for sequence, prob in sequences.posterior.items():
             if np.isnan(prob):
-                prob = float("-inf")
+                prob = 0
 
             if isinstance(sequence[-1], EndOfSequence):
                 sequence = sequence[:-1]

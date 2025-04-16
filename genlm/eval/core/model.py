@@ -1,59 +1,25 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 
 
-@dataclass
-class ModelResponse:
+class ModelResponse(BaseModel):
     """Container for a single response from the model."""
 
     text: str
     prob: float
     metadata: Optional[Dict[str, Any]] = None
 
-    def to_dict(self):
-        metadata = self.metadata if self.metadata is not None else {}
-        return {
-            "text": self.text,
-            "prob": self.prob,
-            "metadata": metadata,
-        }
-
-    @classmethod
-    def from_dict(cls, d):
-        return cls(
-            text=d["text"],
-            prob=d["prob"],
-            metadata=d["metadata"],
-        )
-
     def __repr__(self):
         return f"ModelResponse(\n\ttext={self.text},\n\tprob={self.prob},\n\tmetadata={self.metadata}\n)"
 
 
-@dataclass
-class ModelOutput:
+class ModelOutput(BaseModel):
     """Container for the complete model output, including ensemble and runtime info."""
 
     responses: List[ModelResponse]
     runtime_seconds: float
     metadata: Optional[Dict[str, Any]] = None
-
-    def to_dict(self):
-        metadata = self.metadata if self.metadata is not None else {}
-        return {
-            "responses": [r.to_dict() for r in self.responses],
-            "runtime_seconds": self.runtime_seconds,
-            "metadata": metadata,
-        }
-
-    @classmethod
-    def from_dict(cls, d):
-        return cls(
-            responses=[ModelResponse.from_dict(r) for r in d["responses"]],
-            runtime_seconds=d["runtime_seconds"],
-            metadata=d["metadata"],
-        )
 
     def __repr__(self):
         return f"ModelOutput(\n\truntime_seconds={self.runtime_seconds},\n\tresponses={self.responses},\n\tmetadata={self.metadata}\n)"

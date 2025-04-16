@@ -2,7 +2,7 @@ from pathlib import Path
 from functools import lru_cache
 from .spider.evaluator import Evaluator as BaseSpiderEvaluator
 
-from genlm.eval.core import Evaluator
+from genlm.eval.core import Evaluator, EvaluationResult
 from .dataset import SpiderInstance
 
 
@@ -18,4 +18,9 @@ class SpiderEvaluator(Evaluator[SpiderInstance]):
         return self.evaluator.evaluate(x, y, db_name=db)
 
     def evaluate_response(self, instance, response):
-        return self.cached_eval(response, instance.gold, instance.schema_name)[0]
+        is_correct, reason = self.cached_eval(
+            response, instance.gold, instance.schema_name
+        )
+        if reason is None:
+            reason = "valid"
+        return EvaluationResult(score=float(is_correct), desc=reason)

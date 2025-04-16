@@ -1,5 +1,6 @@
 import os
 from genlm.control import BoolCFG
+
 from genlm.eval.models.control import ControlModelAdaptor
 
 

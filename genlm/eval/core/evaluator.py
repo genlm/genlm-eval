@@ -1,29 +1,37 @@
 from abc import ABC, abstractmethod
-from typing import TypeVar, Generic, List, Dict, Any
+from typing import TypeVar, Generic, Dict, Any
 from pydantic import BaseModel
 
-from .model import ModelOutput, ModelResponse
+from .model import ModelOutput
 
 T = TypeVar("T", bound=BaseModel)
 
 
+class EvaluationResult(BaseModel):
+    """Class for storing evaluation results."""
+
+    score: float
+    desc: str
+    metadata: Dict[str, Any] = {}
+
+
 class Evaluator(Generic[T], ABC):
-    """Base class for evaluators that handle prompt generation and response evaluation.
+    """Base class for evaluators that handle response evaluation.
 
     Args:
         T: The Pydantic model type that defines the schema for dataset instances.
     """
 
     @abstractmethod
-    def evaluate_response(self, instance: T, response: str) -> bool:
+    def evaluate_response(self, instance, response):
         """Evaluate a single response for correctness.
 
         Args:
-            instance: The dataset instance being evaluated.
-            response: The model's response text.
+            instance (T): The dataset instance being evaluated.
+            response (str): The model's response text.
 
         Returns:
-            bool: Whether the response is correct.
+            (EvaluationResult): The evaluation result.
         """
         pass
 
@@ -34,31 +42,18 @@ class Evaluator(Generic[T], ABC):
         Override this method to add custom evaluation metrics.
 
         Args:
-            instance: The dataset instance being evaluated.
-            output: The complete model output including ensemble responses.
+            instance (T): The dataset instance being evaluated.
+            output (ModelOutput): The complete model output including ensemble responses.
 
         Returns:
-            Dict[str, Any]: Dictionary containing evaluation metrics.
+            (Dict[str, Any]): Dictionary containing evaluation metrics.
         """
-        correct_responses: List[ModelResponse] = []
-        incorrect_responses: List[ModelResponse] = []
-
+        weighted_accuracy = 0.0
         for response in output.responses:
-            if self.evaluate_response(instance, response.text):
-                correct_responses.append(response)
-            else:
-                incorrect_responses.append(response)
-
-        correct_weight = sum(r.prob for r in correct_responses)
-        total_weight = sum(r.prob for r in output.responses)
-        num_valid = len(output.responses)
+            score = self.evaluate_response(instance, response.text)
+            weighted_accuracy += score.score * response.prob
 
         return {
-            "weighted_accuracy": correct_weight / total_weight
-            if total_weight > 0
-            else 0.0,
-            "num_correct": len(correct_responses),
-            "num_valid": num_valid,
+            "weighted_accuracy": weighted_accuracy,
             "runtime_seconds": output.runtime_seconds,
-            "num_responses": len(output.responses),
         }
