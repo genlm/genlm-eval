@@ -1,0 +1,4 @@
+[run]
+omit =
+    */tests/*
+    */genlm/eval/domains/spider/spider/*
