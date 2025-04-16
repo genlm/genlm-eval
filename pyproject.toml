@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "genlm-eval"
 version = "0.1.0"
-description = "Evaluation framework for language models"
+description = "Evaluation framework for models in the GenLM ecosystem"
 authors = []
 readme = "README.md"
 requires-python = ">=3.10"
@@ -30,6 +30,10 @@ spider = [
     "rapidfuzz",
 ]
 
+molecules = [
+    "rdkit",
+]
+
 test = [
     "coverage",
     "pytest",
@@ -37,11 +41,3 @@ test = [
 
 [tool.setuptools.packages.find]
 include = ["genlm", "genlm/eval"]
-
-[tool.pytest.ini_options]
-minversion = "6.0"
-addopts = "-ra -q"
-testpaths = [
-    "tests",
-]
-asyncio_mode = "auto"
