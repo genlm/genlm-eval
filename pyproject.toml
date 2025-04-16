@@ -33,8 +33,6 @@ spider = [
 test = [
     "coverage",
     "pytest",
-    "pytest-asyncio",
-    "pytest-mock",
 ]
 
 [tool.setuptools.packages.find]
