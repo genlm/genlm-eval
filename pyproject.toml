@@ -32,7 +32,7 @@ spider = [
 
 molecules = [
     "rdkit",
-    "ps",
+    "partialsmiles",
 ]
 
 test = [
