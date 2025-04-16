@@ -18,9 +18,11 @@ class SpiderEvaluator(Evaluator[SpiderInstance]):
         return self.evaluator.evaluate(x, y, db_name=db)
 
     def evaluate_response(self, instance, response):
-        is_correct, reason = self.cached_eval(
+        is_correct, reason, level = self.cached_eval(
             response, instance.gold, instance.schema_name
         )
         if reason is None:
             reason = "valid"
-        return EvaluationResult(score=float(is_correct), desc=reason)
+        return EvaluationResult(
+            score=float(is_correct), desc=reason, metadata={"level": level}
+        )

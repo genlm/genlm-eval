@@ -1,13 +1,14 @@
 from pathlib import Path
 
-from . import evaluation as E
 from .evaluation import (
     build_foreign_key_map_from_json,
     build_valid_col_units,
     rebuild_sql_val,
     rebuild_sql_col,
     eval_exec_match,
+    eval_hardness,
 )
+from .process_sql import get_schema, Schema, get_sql
 
 
 class Evaluator:
@@ -15,10 +16,10 @@ class Evaluator:
         self.tables_path = spider_dir / "tables.json"
         self.db_path = spider_dir / "database"
         self.kmaps = build_foreign_key_map_from_json(self.tables_path)
-        self.official_evaluator = E.Evaluator()  # the official Spider Evaluator
+        # self.official_evaluator = E.Evaluator()  # the official Spider Evaluator
         self.timeout = timeout
 
-    def evaluate(self, gold: str, pred: str, db_name: str, return_level: bool = False):
+    def evaluate(self, gold: str, pred: str, db_name: str):
         """Returns: bool, Optional[str]
 
         On success (i.e., predicted execution result is the same as gold), returns `(True, None)`
@@ -27,14 +28,14 @@ class Evaluator:
         * `mismatch` if `pred` is a well-formed sql but the execution result is different from that of the `gold`.
         """
         db = self.db_path / db_name / (db_name + ".sqlite")
-        schema = E.Schema(E.get_schema(db))
+        schema = Schema(get_schema(db))
 
         try:
-            g_sql = E.get_sql(schema, gold)
-            p_sql = E.get_sql(schema, pred)
+            g_sql = get_sql(schema, gold)
+            p_sql = get_sql(schema, pred)
         except Exception:
             # sql is ill-formed (can't be parsed by sqlite engine)
-            return False, "invalid"
+            return False, "invalid", None
 
         kmap = self.kmaps[db_name]
 
@@ -49,8 +50,5 @@ class Evaluator:
         exec_match = eval_exec_match(db, pred, gold, p_sql, g_sql, timeout=self.timeout)
         reason = None if exec_match else "mismatch"
 
-        if not return_level:
-            return exec_match, reason
-
-        difficulty_level = self.official_evaluator.eval_hardness(g_sql)
+        difficulty_level = eval_hardness(g_sql)
         return exec_match, reason, difficulty_level

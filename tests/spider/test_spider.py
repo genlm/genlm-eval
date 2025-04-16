@@ -29,6 +29,7 @@ def spider_evaluator(spider_data_dir):
 def test_spider_data(spider_dataset):
     assert spider_dataset.schema is SpiderInstance
     for instance in spider_dataset:
+        str(instance)
         assert isinstance(instance, SpiderInstance)
 
 
@@ -37,7 +38,7 @@ def test_spider_evaluator(spider_dataset, spider_evaluator):
 
     assert spider_evaluator.evaluate_response(
         first_instance, "SELECT count(*) FROM singer"
-    ) == EvaluationResult(score=1.0, desc="valid")
+    ) == EvaluationResult(score=1.0, desc="valid", metadata={"level": "easy"})
 
     ensemble_result = spider_evaluator.evaluate_ensemble(
         first_instance,
@@ -97,6 +98,7 @@ def test_run_evaluation(spider_dataset, spider_evaluator):
         max_tokens=100,
         n_particles=n_particles,
         ess_threshold=0.5,
+        lm_args={"backend": "hf"},
     )
 
     n_replicates = 1

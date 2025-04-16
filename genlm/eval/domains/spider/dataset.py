@@ -30,7 +30,7 @@ class SpiderDataset(Dataset[SpiderInstance]):
         self.spider_schemas = spider_schemas
 
         if few_shot_example_ids is None:
-            few_shot_example_ids = [10, 100, 1000]
+            few_shot_example_ids = [10, 100, 1000]  # pragma: no cover
 
         self.few_shot_examples = []
         for example_id in few_shot_example_ids:

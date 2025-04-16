@@ -1,6 +1,41 @@
 import os
 import json
+import pydantic
 from genlm.eval.core.model import ModelOutput
+
+
+def _load_cached_output(path):
+    """Try to load cached output, return None if invalid."""
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r") as f:
+            return ModelOutput.model_validate_json(f.read())
+    except (json.JSONDecodeError, pydantic.ValidationError):
+        return None
+
+
+def _load_cached_results(path):
+    """Try to load cached results, return None if invalid."""
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        return None
+
+
+def _save_output(output, path):
+    """Save model output to file."""
+    with open(path, "w") as f:
+        f.write(output.model_dump_json(indent=4))
+
+
+def _save_results(results, path):
+    """Save evaluation results to file."""
+    with open(path, "w") as f:
+        json.dump(results, f, indent=4)
 
 
 async def run_evaluation(
@@ -36,7 +71,7 @@ async def run_evaluation(
         raise ValueError("Cannot overwrite output without overwriting results")
 
     if output_dir is not None and not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+        os.makedirs(output_dir)  # pragma: no cover
 
     for instance in dataset:
         instance_results = []
@@ -46,7 +81,6 @@ async def run_evaluation(
         for i in range(n_replicates):
             output = None
             result = None
-
             if output_dir is not None:
                 record_path = os.path.join(output_dir, f"{instance_id}-{i}-record.json")
                 instance_output_path = os.path.join(
@@ -56,37 +90,29 @@ async def run_evaluation(
                     output_dir, f"{instance_id}-{i}-results.json"
                 )
 
-                if not overwrite_output and os.path.exists(instance_output_path):
-                    try:
-                        with open(instance_output_path, "r") as f:
-                            output = ModelOutput.model_validate_json(f.read())
-                    except json.JSONDecodeError:
-                        pass
-
-                if not overwrite_results and os.path.exists(instance_results_path):
-                    try:
-                        with open(instance_results_path, "r") as f:
-                            result = json.load(f)
-                    except json.JSONDecodeError:
-                        pass
+                # Try loading cached files if not overwriting
+                if not overwrite_output:
+                    output = _load_cached_output(instance_output_path)
+                if not overwrite_results:
+                    result = _load_cached_results(instance_results_path)
             else:
                 record_path = None
                 instance_output_path = None
                 instance_results_path = None
 
+            # Generate new output if needed
+            wrote_output = False
             if output is None:
                 output = await model.generate(instance, record_path)
-
                 if instance_output_path is not None:
-                    with open(instance_output_path, "w") as f:
-                        f.write(output.model_dump_json(indent=4))
+                    wrote_output = True
+                    _save_output(output, instance_output_path)
 
-            if result is None or overwrite_results:
+            # Evaluate if we need new results (no results, overwriting results, or wrote new output)
+            if result is None or overwrite_results or wrote_output:
                 result = evaluator.evaluate_ensemble(instance, output)
-
                 if instance_results_path is not None:
-                    with open(instance_results_path, "w") as f:
-                        f.write(result.model_dump_json(indent=4))
+                    _save_results(result, instance_results_path)
 
             instance_results.append(result)
             instance_outputs.append(output)

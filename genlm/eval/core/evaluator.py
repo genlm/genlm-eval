@@ -33,7 +33,7 @@ class Evaluator(Generic[T], ABC):
         Returns:
             (EvaluationResult): The evaluation result.
         """
-        pass
+        pass  # pragma: no cover
 
     def evaluate_ensemble(self, instance: T, output: ModelOutput) -> Dict[str, Any]:
         """Evaluate the complete model output, including ensemble responses.

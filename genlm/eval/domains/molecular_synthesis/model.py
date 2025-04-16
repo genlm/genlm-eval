@@ -1,6 +1,6 @@
 import os
 import numpy as np
-from functools import lru_cache, cached_property
+from functools import cached_property
 
 from genlm.control import Potential, PromptedLLM, BoolCFG
 from genlm.eval.models.control import ControlModelAdaptor
@@ -9,10 +9,6 @@ from genlm.eval.models.control import ControlModelAdaptor
 class PartialSMILES(Potential):
     def __init__(self):
         super().__init__(vocabulary=list(range(256)))
-
-    @lru_cache(maxsize=None)
-    def _parse(self, query):
-        return self.parser.parse(query)
 
     async def prefix(self, context):
         string = bytes(context).decode("utf-8", errors="ignore")
@@ -27,7 +23,7 @@ class PartialSMILES(Potential):
         return self._validate(string, partial=False)
 
     def _validate(self, smiles, partial):
-        import ps
+        import partialsmiles as ps
 
         try:
             ps.ParseSmiles(smiles, partial=partial)

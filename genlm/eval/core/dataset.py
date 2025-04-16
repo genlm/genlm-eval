@@ -26,7 +26,7 @@ class Dataset(Generic[T], ABC):
         Returns:
             Iterator[T]: An iterator over instances conforming to schema T.
         """
-        pass
+        pass  # pragma: no cover
 
     @property
     @abstractmethod
@@ -36,4 +36,4 @@ class Dataset(Generic[T], ABC):
         Returns:
             type[T]: The Pydantic model class defining the schema.
         """
-        pass
+        pass  # pragma: no cover

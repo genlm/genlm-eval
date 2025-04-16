@@ -32,11 +32,14 @@ spider = [
 
 molecules = [
     "rdkit",
+    "ps",
 ]
 
 test = [
     "coverage",
     "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
 ]
 
 [tool.setuptools.packages.find]

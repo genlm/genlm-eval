@@ -5,6 +5,9 @@ def bootstrap_ci(values, metric, ci=0.95, n_bootstrap=10000):
     if not 0 < ci < 1:
         raise ValueError("ci must be between 0 and 1")
 
+    if not values:
+        raise ValueError("values must not be empty")
+
     values = np.asarray(values)
 
     mean = metric(values)

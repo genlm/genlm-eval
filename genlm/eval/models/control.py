@@ -51,22 +51,6 @@ class ControlModelAdaptor(ModelAdaptor):
         """
         return self.make_llm(self.model_name, self.lm_args)
 
-    def fetch_or_create_sampler(self, instance):
-        """Fetch or create the sampler for the model with LRU caching support."""
-        if self.sampler_cache_size == 0:
-            return self.make_sampler(instance)
-
-        cache_key = self.get_sampler_cache_key(instance)
-        if cache_key in self._sampler_cache:
-            self._sampler_cache.move_to_end(cache_key)
-            return self._sampler_cache[cache_key]
-
-        sampler = self.make_sampler(instance)
-        if len(self._sampler_cache) >= self.sampler_cache_size:
-            self._sampler_cache.popitem(last=False)
-        self._sampler_cache[cache_key] = sampler
-        return sampler
-
     def fetch_or_create_critic(self, instance):
         """Fetch or create the critic for the model with LRU caching support."""
         if self.critic_cache_size == 0:
@@ -77,11 +61,29 @@ class ControlModelAdaptor(ModelAdaptor):
             self._critic_cache.move_to_end(cache_key)
             return self._critic_cache[cache_key]
 
-        critic = self.make_critic(instance)
         if len(self._critic_cache) >= self.critic_cache_size:
             self._critic_cache.popitem(last=False)
+
+        critic = self.make_critic(instance)
         self._critic_cache[cache_key] = critic
         return critic
+
+    def fetch_or_create_sampler(self, instance):
+        """Fetch or create the sampler for the model with LRU caching support."""
+        if self.sampler_cache_size == 0:
+            return self.make_sampler(instance)
+
+        cache_key = self.get_sampler_cache_key(instance)
+        if cache_key in self._sampler_cache:
+            self._sampler_cache.move_to_end(cache_key)
+            return self._sampler_cache[cache_key]
+
+        if len(self._sampler_cache) >= self.sampler_cache_size:
+            self._sampler_cache.popitem(last=False)
+
+        sampler = self.make_sampler(instance)
+        self._sampler_cache[cache_key] = sampler
+        return sampler
 
     def make_llm(self, model_name, lm_args):
         """Create a new PromptedLLM instance.
@@ -186,7 +188,7 @@ class ControlModelAdaptor(ModelAdaptor):
         """
         self.llm.prompt_ids = self.make_prompt_ids(instance)
         sampler = self.fetch_or_create_sampler(instance)
-        critic = self.make_critic(instance)
+        critic = self.fetch_or_create_critic(instance)
 
         start_time = time.time()
         sequences = await sampler.smc(
@@ -202,7 +204,7 @@ class ControlModelAdaptor(ModelAdaptor):
         # TODO: maybe this should be decoded_posterior?
         for sequence, prob in sequences.posterior.items():
             if np.isnan(prob):
-                prob = 0
+                continue
 
             if isinstance(sequence[-1], EndOfSequence):
                 sequence = sequence[:-1]

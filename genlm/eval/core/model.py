@@ -10,9 +10,6 @@ class ModelResponse(BaseModel):
     prob: float
     metadata: Optional[Dict[str, Any]] = None
 
-    def __repr__(self):
-        return f"ModelResponse(\n\ttext={self.text},\n\tprob={self.prob},\n\tmetadata={self.metadata}\n)"
-
 
 class ModelOutput(BaseModel):
     """Container for the complete model output, including ensemble and runtime info."""
@@ -20,9 +17,6 @@ class ModelOutput(BaseModel):
     responses: List[ModelResponse]
     runtime_seconds: float
     metadata: Optional[Dict[str, Any]] = None
-
-    def __repr__(self):
-        return f"ModelOutput(\n\truntime_seconds={self.runtime_seconds},\n\tresponses={self.responses},\n\tmetadata={self.metadata}\n)"
 
 
 class ModelAdaptor(ABC):
@@ -38,9 +32,9 @@ class ModelAdaptor(ABC):
         Returns:
             ModelOutput: Container with weighted ensemble responses and metadata.
         """
-        pass
+        pass  # pragma: no cover
 
     @abstractmethod
     def metadata(self) -> Dict[str, Any]:
         """Get metadata about the model."""
-        pass
+        pass  # pragma: no cover

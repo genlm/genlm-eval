@@ -4,7 +4,10 @@ from pathlib import Path
 
 from genlm.control import direct_token_sampler
 
-from genlm.eval.domains.molecular_synthesis.model import MolecularSynthesisModel
+from genlm.eval.domains.molecular_synthesis.model import (
+    MolecularSynthesisModel,
+    PartialSMILES,
+)
 from genlm.eval.domains.molecular_synthesis.dataset import (
     MolecularSynthesisDataset,
     MolecularSynthesisInstance,
@@ -92,7 +95,7 @@ def test_run_evaluation(mol_dataset, mol_evaluator):
             return direct_token_sampler(self.llm)
 
         def make_critic(self, instance):
-            return
+            return PartialSMILES().coerce(self.llm, f=b"".join)
 
     n_particles = 2
 
@@ -101,6 +104,7 @@ def test_run_evaluation(mol_dataset, mol_evaluator):
         max_tokens=100,
         n_particles=n_particles,
         ess_threshold=0.5,
+        lm_args={"backend": "hf"},
     )
 
     n_replicates = 1
