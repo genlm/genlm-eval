@@ -93,13 +93,16 @@ def test_run_evaluation(spider_dataset, spider_evaluator):
 
     n_particles = 2
 
-    model = TestSpiderModel(
-        model_name="meta-llama/Llama-3.2-1B-Instruct",
-        max_tokens=100,
-        n_particles=n_particles,
-        ess_threshold=0.5,
-        lm_args={"backend": "hf"},
-    )
+    try:
+        model = TestSpiderModel(
+            model_name="meta-llama/Llama-3.2-1B-Instruct",
+            max_tokens=100,
+            n_particles=n_particles,
+            ess_threshold=0.5,
+            lm_args={"backend": "hf"},
+        )
+    except OSError:
+        pytest.skip("Llama-3.2-1B-Instruct is not available")
 
     n_replicates = 1
 
