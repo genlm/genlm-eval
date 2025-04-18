@@ -30,9 +30,9 @@ Remember, DO NOT provide any commentary or explanation of what the code does, ju
             self.grammar_dir = grammar_dir
         super().__init__(**kwargs)
 
-    def bool_cfg(self, db_name):
+    def bool_cfg(self, schema_name):
         return BoolCFG.from_lark(
-            open(os.path.join(self.grammar_dir, db_name + ".lark"), "r").read()
+            open(os.path.join(self.grammar_dir, schema_name + ".lark"), "r").read()
         )
 
     def make_prompt_ids(self, instance):
@@ -40,12 +40,12 @@ Remember, DO NOT provide any commentary or explanation of what the code does, ju
         few_shot_examples = [
             (
                 self.user_message_template.format(
-                    schema_str=schema,
+                    schema_str=schema_str,
                     utterance=utterance,
                 ),
                 query,
             )
-            for schema, utterance, query in instance.few_shot_examples
+            for schema_str, utterance, query in instance.few_shot_examples
         ]
         return self.llm.model.tokenizer.apply_chat_template(
             self.chat_template_formatter(
