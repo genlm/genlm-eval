@@ -12,36 +12,34 @@ class MolecularSynthesisInstance(Instance):
 class MolecularSynthesisDataset(Dataset[MolecularSynthesisInstance]):
     """Dataset for molecular synthesis evaluation."""
 
-    def __init__(self, molecules, n_molecules=20, n_prompts=100, seed=1234):
+    def __init__(self, prompt_molecules):
         """Initialize the dataset with a list of molecules.
 
         Args:
-            molecules: List of molecules to evaluate.
-            n_molecules: Number of molecules to sample.
-            n_prompts: Number of prompts to sample.
-            seed: Seed for the random number generator.
+            prompt_molecules: List of lists of molecules which will be used to generate prompts.
         """
-        self.molecules = molecules
-        self.n_molecules = n_molecules
-        self.n_prompts = n_prompts
-        self.seed = seed
-        random.seed(seed)
+        self.prompt_molecules = prompt_molecules
 
     @classmethod
-    def from_smiles(cls, smiles_path, n_molecules=20, n_prompts=100, seed=1234):
+    def from_smiles(cls, smiles_path, n_molecules=20, n_instances=100, seed=1234):
         """Load molecules from a SMILES file.
 
         Args:
             smiles_path (str): Path to the .smi file containing SMILES strings.
             n_molecules (int): Number of molecules to sample.
-            n_prompts (int): Number of prompts to sample.
+            n_instances (int): Number of instances to sample.
             seed (int): Seed for the random number generator.
 
         Returns:
             MolecularSynthesisDataset: Dataset initialized with molecules from the SMILES.
         """
         molecules = open(smiles_path).readlines()
-        return cls(molecules, n_molecules, n_prompts, seed)
+        prompt_molecules = []
+        random.seed(seed)
+        for _ in range(n_instances):
+            molecule_ids = random.sample(range(len(molecules)), n_molecules)
+            prompt_molecules.append([molecules[i] for i in molecule_ids])
+        return cls(prompt_molecules)
 
     def __iter__(self):
         """Iterate over molecules.
@@ -49,12 +47,8 @@ class MolecularSynthesisDataset(Dataset[MolecularSynthesisInstance]):
         Returns:
             Iterator[MolecularSynthesisInstance]: Iterator over molecular synthesis instances.
         """
-        for instance_id in range(self.n_prompts):
-            molecule_ids = random.sample(range(len(self.molecules)), self.n_molecules)
-            molecules = [self.molecules[i] for i in molecule_ids]
-            yield MolecularSynthesisInstance(
-                molecules=molecules, instance_id=instance_id
-            )
+        for i, molecules in enumerate(self.prompt_molecules):
+            yield MolecularSynthesisInstance(molecules=molecules, instance_id=i)
 
     @property
     def schema(self):
