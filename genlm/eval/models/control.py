@@ -16,6 +16,7 @@ class ControlModelAdaptor(ModelAdaptor):
         max_tokens,
         n_particles,
         ess_threshold,
+        resampling_method="multinomial",
         lm_args=None,
         sampler_cache_size=0,
         critic_cache_size=0,
@@ -23,18 +24,20 @@ class ControlModelAdaptor(ModelAdaptor):
         """Initialize the controlled LLM adaptor.
 
         Args:
-            model_name: Name of the model to use
-            max_tokens: Maximum number of tokens to generate
-            n_particles: Number of particles for sampling
-            ess_threshold: ESS threshold for resampling
-            lm_args: Arguments for the language model
-            sampler_cache_size: Size of the sampler cache. 0 means no caching.
-            critic_cache_size: Size of the critic cache. 0 means no caching.
+            model_name (str): Name of the model to use
+            max_tokens (int): Maximum number of tokens to generate
+            n_particles (int): Number of particles for sampling
+            ess_threshold (float): ESS threshold for resampling
+            resampling_method (str): Resampling method to use. See `llamppl.inference.smc_standard` for options.
+            lm_args (dict): Arguments for the language model
+            sampler_cache_size (int): Size of the sampler cache. 0 means no caching.
+            critic_cache_size (int): Size of the critic cache. 0 means no caching.
         """
         self.model_name = model_name
         self.max_tokens = max_tokens
         self.n_particles = n_particles
         self.ess_threshold = ess_threshold
+        self.resampling_method = resampling_method
         self.lm_args = lm_args or {}
 
         self.sampler_cache_size = sampler_cache_size
@@ -88,14 +91,15 @@ class ControlModelAdaptor(ModelAdaptor):
     def make_llm(self, model_name, lm_args):
         """Create a new PromptedLLM instance.
 
-        Override this method to customize the language model configuration.
+        Override this method to customize the language model configuration, like
+        setting the temperature or eos tokens.
 
         Args:
             model_name (str): Name of the model to initialize
             lm_args (dict): Additional arguments for model initialization
 
         Returns:
-            PromptedLLM: The initialized language model
+            (PromptedLLM): The initialized language model
         """
         return PromptedLLM.from_name(model_name, **lm_args)
 
@@ -105,12 +109,12 @@ class ControlModelAdaptor(ModelAdaptor):
         Override this method to provide custom cache keys.
 
         Args:
-            instance: The dataset instance to generate a cache key for
+            instance (DatasetInstance): The dataset instance to generate a cache key for
 
         Returns:
-            str: A unique cache key for the instance
+            (Any): A unique cache key for the instance
         """
-        return str(instance)
+        return instance.instance_id
 
     def get_critic_cache_key(self, instance):
         """Generate a cache key for the critic instances.
@@ -118,12 +122,12 @@ class ControlModelAdaptor(ModelAdaptor):
         Override this method to provide custom cache keys.
 
         Args:
-            instance: The dataset instance to generate a cache key for
+            instance (DatasetInstance): The dataset instance to generate a cache key for
 
         Returns:
-            str: A unique cache key for the instance
+            (Any): A unique cache key for the instance
         """
-        return str(instance)
+        return instance.instance_id
 
     def make_sampler(self, instance):
         """Create a `genlm.control.TokenSampler` instance given a dataset instance.
@@ -161,10 +165,10 @@ class ControlModelAdaptor(ModelAdaptor):
         language model before generation.
 
         Args:
-            instance: The dataset instance
+            instance (DatasetInstance): The dataset instance
 
         Returns:
-            List[int]: A list of token IDs representing the prompt
+            (List[int]): A list of token IDs representing the prompt
         """
         raise NotImplementedError("Subclasses must implement `make_prompt_ids`")
 
@@ -197,9 +201,26 @@ class ControlModelAdaptor(ModelAdaptor):
             ess_threshold=self.ess_threshold,
             critic=critic,
             json_path=record_path,
+            resampling_method=self.resampling_method,
         )
         runtime = time.time() - start_time
+        responses = self.postprocess_sequences(sequences)
 
+        return ModelOutput(
+            responses=responses,
+            runtime_seconds=runtime,
+            metadata=self.metadata(),
+        )
+
+    def postprocess_sequences(self, sequences):
+        """Convert a sequence of particles into a list of ModelResponse objects.
+
+        Args:
+            sequences (Sequences): The sequences object containing particles and their probabilities
+
+        Returns:
+            (List[ModelResponse]): A list of ModelResponse objects.
+        """
         responses = []
         # TODO: maybe this should be decoded_posterior?
         for sequence, prob in sequences.posterior.items():
@@ -226,11 +247,7 @@ class ControlModelAdaptor(ModelAdaptor):
             except UnicodeDecodeError:
                 continue
 
-        return ModelOutput(
-            responses=responses,
-            runtime_seconds=runtime,
-            metadata=self.metadata(),
-        )
+        return responses
 
     def metadata(self):
         return {
