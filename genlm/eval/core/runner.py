@@ -45,7 +45,7 @@ async def run_evaluation(
     output_dir=None,
     n_replicates=1,
     overwrite_results=False,
-    overwrite_output=False,
+    overwrite_outputs=False,
     verbosity=0,
 ):
     """Run evaluation on a dataset using the provided model and evaluator.
@@ -57,7 +57,7 @@ async def run_evaluation(
         output_dir (str, optional): The directory to save the results. Defaults to None, in which case results are not saved.
         n_replicates (int, optional): Number of times to replicate the evaluation. Defaults to 1.
         overwrite_results (bool, optional): Whether to overwrite existing evaluation results. Defaults to False.
-        overwrite_output (bool, optional): Whether to overwrite existing output. Defaults to False.
+        overwrite_outputs (bool, optional): Whether to overwrite existing output. Defaults to False.
         verbosity (int, optional): The verbosity of the evaluation. Defaults to 0, which is silent.
 
     Returns:
@@ -67,8 +67,10 @@ async def run_evaluation(
     all_instance_results = []
     all_instance_outputs = []
 
-    if overwrite_output and not overwrite_results:
-        raise ValueError("Cannot overwrite output without overwriting results")
+    if overwrite_outputs and not overwrite_results:
+        raise ValueError(
+            "Cannot overwrite outputs without overwriting results. (Hint: set overwrite_results=True)"
+        )
 
     if output_dir is not None and not os.path.exists(output_dir):
         os.makedirs(output_dir)  # pragma: no cover
@@ -91,7 +93,7 @@ async def run_evaluation(
                 )
 
                 # Try loading cached files if not overwriting
-                if not overwrite_output:
+                if not overwrite_outputs:
                     output = _load_cached_output(instance_output_path)
                 if not overwrite_results:
                     result = _load_cached_results(instance_results_path)

@@ -101,7 +101,7 @@ async def test_evaluation_with_existing_output(
             model=mock_model,
             evaluator=mock_evaluator,
             output_dir=tmpdir,
-            overwrite_output=False,
+            overwrite_outputs=False,
         )
 
         mock_model.generate.assert_not_called()
@@ -118,7 +118,7 @@ async def test_invalid_overwrite_configuration(
             dataset=mock_dataset,
             model=mock_model,
             evaluator=mock_evaluator,
-            overwrite_output=True,
+            overwrite_outputs=True,
             overwrite_results=False,
         )
 
@@ -139,7 +139,7 @@ async def test_evaluation_with_existing_results_only(
             model=mock_model,
             evaluator=mock_evaluator,
             output_dir=tmpdir,
-            overwrite_output=False,
+            overwrite_outputs=False,
             overwrite_results=True,
         )
 
@@ -169,7 +169,7 @@ async def test_evaluation_with_invalid_json_files(
             model=mock_model,
             evaluator=mock_evaluator,
             output_dir=tmpdir,
-            overwrite_output=False,
+            overwrite_outputs=False,
             overwrite_results=False,
         )
 
@@ -207,7 +207,7 @@ async def test_evaluation_with_invalid_output_valid_results(
             model=mock_model,
             evaluator=mock_evaluator,
             output_dir=tmpdir,
-            overwrite_output=False,
+            overwrite_outputs=False,
             overwrite_results=False,
         )
 
