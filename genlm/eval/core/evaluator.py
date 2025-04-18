@@ -49,11 +49,20 @@ class Evaluator(Generic[T], ABC):
             (Dict[str, Any]): Dictionary containing evaluation metrics.
         """
         weighted_accuracy = 0.0
+        results = []
         for response in output.responses:
-            score = self.evaluate_response(instance, response.text)
-            weighted_accuracy += score.score * response.prob
+            result = self.evaluate_response(instance, response.text)
+            weighted_accuracy += result.score * response.prob
+            results.append(
+                {
+                    "score": result.score,
+                    "desc": result.desc,
+                    "metadata": result.metadata,
+                }
+            )
 
         return {
             "weighted_accuracy": weighted_accuracy,
             "runtime_seconds": output.runtime_seconds,
+            "results": results,
         }
