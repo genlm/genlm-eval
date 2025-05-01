@@ -23,18 +23,20 @@ class SpiderTableColumnVerifier(Potential):
     def _extract_latest_subquery(query):
         # capture the latest SELECT statement within parentheses (partial or complete)
         subqueries = re.findall(
-            r"\(\s*(SELECT.*?)(?:\s*\)|$)", query, re.IGNORECASE | re.DOTALL
+            r"\(\s*(SELECT[^()]*(?:\([^()]*\)[^()]*)*?)(?:\)|$)",
+            query,
+            re.IGNORECASE | re.DOTALL,
         )
-        return subqueries[-1] if subqueries else None
+        return subqueries[-1].strip() if subqueries else None
 
     @staticmethod
     def _strip_query_at_boundary(query):
-        if query.endswith("WHERE"):
-            return query.rstrip("WHERE")
-        elif query.endswith("GROUP BY"):
-            return query.rstrip("GROUP BY")
-        elif query.endswith("ORDER"):
-            return query.rstrip("ORDER")
+        if query.endswith(" WHERE"):
+            return query.rstrip(" WHERE")
+        elif query.endswith(" GROUP BY"):
+            return query.rstrip(" GROUP BY")
+        elif query.endswith(" ORDER"):
+            return query.rstrip(" ORDER")
         return None
 
     def _validate(self, parsed):
@@ -94,10 +96,10 @@ class JoinConstraint:
     expr: str
 
     def __repr__(self):
-        return f"JoinConstraint({self.expr})"
+        return f"JoinConstraint({self.expr})"  # pragma: no cover
 
     def __str__(self):
-        return f"JoinConstraint({self.expr})"
+        return f"JoinConstraint({self.expr})"  # pragma: no cover
 
 
 @dataclass
@@ -105,18 +107,18 @@ class Alias:
     alias: str
 
     def __repr__(self):
-        return f"Alias({self.alias})"
+        return f"Alias({self.alias})"  # pragma: no cover
 
     def __str__(self):
-        return f"Alias({self.alias})"
+        return f"Alias({self.alias})"  # pragma: no cover
 
 
 try:
     from lark.visitors import Transformer
 
     HAS_LARK = True
-except ImportError:
-    HAS_LARK = False
+except ImportError:  # pragma: no cover
+    HAS_LARK = False  # pragma: no cover
 
 if HAS_LARK:
 
@@ -508,6 +510,6 @@ if HAS_LARK:
 
 else:
 
-    class ColumnValidator:
-        def __init__(self, *args, **kwargs):
-            raise ImportError("lark is not installed")
+    class ColumnValidator:  # pragma: no cover
+        def __init__(self, *args, **kwargs):  # pragma: no cover
+            raise ImportError("lark is not installed")  # pragma: no cover

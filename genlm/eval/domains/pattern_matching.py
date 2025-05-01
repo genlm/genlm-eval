@@ -84,14 +84,9 @@ class PatternMatchingEvaluator(Evaluator[PatternMatchingInstance]):
             response (str): The model's response text.
 
         Returns:
-            (bool): Whether the response matches the pattern.
+            (EvaluationResult): Evaluation result for whether the response matches the pattern.
         """
-        is_valid = False
-        try:
-            is_valid = regex.compile(instance.pattern).fullmatch(response) is not None
-        except (regex.error, TypeError):
-            is_valid = False
-
+        is_valid = regex.compile(instance.pattern).fullmatch(response) is not None
         return EvaluationResult(
             score=int(is_valid), desc="valid" if is_valid else "invalid"
         )

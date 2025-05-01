@@ -4,7 +4,7 @@ from .dataset import Instance
 
 
 class ModelResponse(BaseModel):
-    """Container for a single response from the model."""
+    """Single model response containing generated text, probability, and optional metadata."""
 
     text: str
     prob: float
@@ -12,7 +12,7 @@ class ModelResponse(BaseModel):
 
 
 class ModelOutput(BaseModel):
-    """Container for the complete model output, including ensemble and runtime info."""
+    """Collection of model responses with execution metadata."""
 
     responses: List[ModelResponse]
     runtime_seconds: float
@@ -21,10 +21,19 @@ class ModelOutput(BaseModel):
 
 @runtime_checkable
 class ModelAdaptor(Protocol):
-    """Protocol for model adapters. Must be async callable that takes a dataset Instance and returns a ModelOutput."""
+    """Protocol for async model adapters that process instances into model outputs."""
 
     async def __call__(
         self, instance: Instance, output_dir: str, replicate: int
     ) -> ModelOutput:
-        """Process an instance and return a ModelOutput."""
-        ...
+        """Process an instance and generate model outputs.
+
+        Args:
+            instance (Instance): Input dataset instance to process
+            output_dir (str): Directory for saving any intermediate results
+            replicate (int): Replicate index for multiple evaluation runs
+
+        Returns:
+            (ModelOutput): Model output containing responses and runtime information
+        """
+        ...  # pragma: no cover

@@ -1,4 +1,4 @@
 [run]
 omit =
     */tests/*
-    */genlm/eval/domains/spider/spider/*
+    */genlm/eval/domains/spider/spider_eval/*

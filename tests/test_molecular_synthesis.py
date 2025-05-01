@@ -92,6 +92,23 @@ def test_mol_evaluator(mol_dataset, mol_evaluator):
     assert ensemble_result["runtime_seconds"] == 0.1
 
 
+@pytest.mark.asyncio
+async def test_potential():
+    potential = PartialSMILES()
+
+    assert await potential.prefix(b"") == 0.0
+    assert await potential.complete(b"") == float("-inf")
+
+    assert await potential.prefix(b"BrC1=C2C3C4C3N(CC4C#C)C2=NC(=O)") == 0.0
+    assert await potential.complete(b"BrC1=C2C3C4C3N(CC4C#C)C2=NC(=O)S1") == 0.0
+
+    assert await potential.prefix(b" BrC1=C2C3C4C3N(CC4C#C)C2=NC(=O)") == 0.0
+    assert await potential.complete(b" BrC1=C2C3C4C3N(CC4C#C)C2=NC(=O)S1") == 0.0
+
+    assert await potential.prefix(b"23r23") == float("-inf")
+    assert await potential.complete(b"2323r2") == float("-inf")
+
+
 def test_run_evaluation(mol_dataset, mol_evaluator):
     LLM = PromptedLLM.from_name("gpt2", backend="hf")
 

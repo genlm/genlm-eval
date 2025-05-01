@@ -29,6 +29,7 @@ def test_data(dataset):
     assert dataset.schema is PatternMatchingInstance
     for instance in dataset:
         assert isinstance(instance, PatternMatchingInstance)
+        repr(instance)
 
 
 def test_from_csv():
@@ -43,12 +44,34 @@ def test_from_csv():
         assert dataset.patterns == ["a|d", "b"]
 
 
+@pytest.mark.asyncio
+async def test_potential():
+    potential = PatternPotential("a|d")
+    assert await potential.prefix(b"") == 0.0
+    assert await potential.complete(b"") == float("-inf")
+    assert await potential.prefix(b"a") == 0.0
+    assert await potential.complete(b"a") == 0.0
+    assert await potential.prefix(b"d") == 0.0
+
+    potential = PatternPotential("abc")
+    assert await potential.prefix(b"") == 0.0
+    assert await potential.complete(b"") == float("-inf")
+    assert await potential.prefix(b"a") == 0.0
+    assert await potential.complete(b"b") == float("-inf")
+    assert await potential.prefix(b"c") == float("-inf")
+    assert await potential.complete(b"abc") == 0.0
+
+
 def test_evaluator(dataset, evaluator):
     first_instance = next(iter(dataset))
 
     result = evaluator.evaluate_sample(first_instance, "a")
     assert result.score == 1
     assert result.desc == "valid"
+
+    result = evaluator.evaluate_sample(first_instance, "b")
+    assert result.score == 0
+    assert result.desc == "invalid"
 
     ensemble_result = evaluator.evaluate_ensemble(
         first_instance,

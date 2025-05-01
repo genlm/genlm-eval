@@ -19,7 +19,8 @@ class Evaluator(Generic[T], ABC):
     """Base class for evaluators that handle response evaluation.
 
     Args:
-        T: The Pydantic model type that defines the schema for dataset instances.
+        T: The Pydantic model type that defines the schema for the dataset instances
+        that the evaluator can handle.
     """
 
     @abstractmethod

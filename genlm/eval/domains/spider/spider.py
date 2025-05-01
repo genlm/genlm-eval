@@ -84,7 +84,7 @@ class SpiderDataset(Dataset[SpiderInstance]):
         train_data = load_spider_data(raw_spider_dir / "train_spider.json")
 
         if grammar_json_path is None:
-            grammar_json_path = Path(__file__).parent / "spider_eval/grammars.json"
+            grammar_json_path = Path(__file__).parent / "grammars.json"
 
         with open(grammar_json_path, "r") as f:
             grammars = json.load(f)
