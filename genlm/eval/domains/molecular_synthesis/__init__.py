@@ -1,9 +1,15 @@
-from .dataset import MolecularSynthesisDataset
-from .evaluator import MolecularSynthesisEvaluator
-from .model import MolecularSynthesisModel
+from .molecular_synthesis import (
+    SYSTEM_PROMPT,
+    MolecularSynthesisDataset,
+    MolecularSynthesisEvaluator,
+    PartialSMILES,
+    MolecularSynthesisInstance,
+)
 
 __all__ = [
+    "SYSTEM_PROMPT",
     "MolecularSynthesisDataset",
     "MolecularSynthesisEvaluator",
-    "MolecularSynthesisModel",
+    "PartialSMILES",
+    "MolecularSynthesisInstance",
 ]
