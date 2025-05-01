@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from genlm.eval.util import bootstrap_ci, chat_template_messages
+from genlm.eval.util import bootstrap_ci, chat_template_messages, LRUCache
 
 
 def test_bootstrap_ci_basic():
@@ -87,3 +87,55 @@ def test_chat_template_messages():
         assert messages[2 * i + 2]["content"] == response
 
     assert messages[-1]["content"] == user_message
+
+
+def test_lru_cache_basic():
+    class TestCache(LRUCache):
+        def create(self, key):
+            return f"value_{key}"
+
+    cache = TestCache(cache_size=2)
+
+    # Test basic cache functionality
+    assert cache.get("a") == "value_a"
+    assert cache.get("a") == "value_a"  # Should hit cache
+    assert len(cache.cache) == 1
+
+    # Test cache eviction
+    cache.get("b")
+    cache.get("c")  # This should evict 'a'
+    assert "a" not in cache.cache
+    assert "b" in cache.cache
+    assert "c" in cache.cache
+    assert len(cache.cache) == 2
+
+
+def test_lru_cache_zero_size():
+    class TestCache(LRUCache):
+        def create(self, key):
+            return f"value_{key}"
+
+    cache = TestCache(cache_size=0)
+
+    # Should always create new value
+    assert cache.get("a") == "value_a"
+    assert len(cache.cache) == 0
+
+
+def test_lru_cache_cleanup():
+    cleaned_items = []
+
+    class TestCache(LRUCache):
+        def create(self, key):
+            return f"value_{key}"
+
+        def cleanup(self, key, obj):
+            cleaned_items.append((key, obj))
+
+    cache = TestCache(cache_size=1)
+
+    cache.get("a")
+    cache.get("b")  # Should evict 'a'
+
+    assert len(cleaned_items) == 1
+    assert cleaned_items[0] == ("a", "value_a")

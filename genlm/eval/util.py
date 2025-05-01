@@ -1,4 +1,6 @@
 import numpy as np
+from abc import abstractmethod, ABC
+from collections import OrderedDict
 
 
 def bootstrap_ci(values, metric, ci=0.95, n_bootstrap=10000):
@@ -30,3 +32,35 @@ def chat_template_messages(prompt, examples, user_message):
         messages.append({"role": "assistant", "content": response})
     messages.append({"role": "user", "content": user_message})
     return messages
+
+
+class LRUCache(ABC):
+    """A cache that evicts the least recently used item when the cache is full."""
+
+    def __init__(self, cache_size=1):
+        self.cache_size = cache_size
+        self.cache = OrderedDict()
+
+    @abstractmethod
+    def create(self, key):
+        pass  # pragma: no cover
+
+    def cleanup(self, key, obj):
+        pass  # pragma: no cover
+
+    def get(self, key):
+        if self.cache_size > 0:
+            if key in self.cache:
+                self.cache.move_to_end(key)
+                return self.cache[key]
+        else:
+            return self.create(key)
+
+        obj = self.create(key)
+        self.cache[key] = obj
+
+        if len(self.cache) > self.cache_size:
+            key, obj = self.cache.popitem(last=False)
+            self.cleanup(key, obj)
+
+        return obj
