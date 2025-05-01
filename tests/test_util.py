@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from genlm.eval.util import bootstrap_ci
+from genlm.eval.util import bootstrap_ci, chat_template_messages
 
 
 def test_bootstrap_ci_basic():
@@ -62,3 +62,28 @@ def test_bootstrap_ci_single_value():
     assert mean == 42
     assert lower == 42
     assert upper == 42
+
+
+def test_chat_template_messages():
+    prompt = "You are a helpful assistant."
+    examples = [
+        ("Hello, how are you?", "Hello, how are you?"),
+        ("What is the capital of France?", "Paris"),
+    ]
+    user_message = "What is the capital of the moon?"
+    messages = chat_template_messages(prompt, examples, user_message)
+
+    assert len(messages) == 2 * len(examples) + 2
+    assert messages[0]["role"] == "system"
+
+    for i in range(1, len(messages) - 1, 2):
+        assert messages[i]["role"] == "user"
+        assert messages[i + 1]["role"] == "assistant"
+
+    assert messages[0]["content"] == prompt
+
+    for i, (example, response) in enumerate(examples):
+        assert messages[2 * i + 1]["content"] == example
+        assert messages[2 * i + 2]["content"] == response
+
+    assert messages[-1]["content"] == user_message

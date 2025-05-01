@@ -21,3 +21,12 @@ def bootstrap_ci(values, metric, ci=0.95, n_bootstrap=10000):
     upper_percentile = (1 + ci) / 2 * 100
     lower, upper = np.percentile(bootstrap_values, [lower_percentile, upper_percentile])
     return mean, lower, upper
+
+
+def chat_template_messages(prompt, examples, user_message):
+    messages = [{"role": "system", "content": prompt}]
+    for example, response in examples:
+        messages.append({"role": "user", "content": example})
+        messages.append({"role": "assistant", "content": response})
+    messages.append({"role": "user", "content": user_message})
+    return messages

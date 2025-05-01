@@ -1,6 +1,6 @@
-from abc import ABC, abstractmethod
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any, Protocol, runtime_checkable, Optional
+from .dataset import Instance
 
 
 class ModelResponse(BaseModel):
@@ -19,22 +19,12 @@ class ModelOutput(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
 
-class ModelAdaptor(ABC):
-    """Base class for model adaptors that handle interaction with language models."""
+@runtime_checkable
+class ModelAdaptor(Protocol):
+    """Protocol for model adapters. Must be async callable that takes a dataset Instance and returns a ModelOutput."""
 
-    @abstractmethod
-    async def generate(self, instance) -> ModelOutput:
-        """Generate responses for a given prompt.
-
-        Args:
-            instance: The input instance to send to the model.
-
-        Returns:
-            ModelOutput: Container with weighted ensemble responses and metadata.
-        """
-        pass  # pragma: no cover
-
-    @abstractmethod
-    def metadata(self) -> Dict[str, Any]:
-        """Get metadata about the model."""
-        pass  # pragma: no cover
+    async def __call__(
+        self, instance: Instance, output_dir: str, replicate: int
+    ) -> ModelOutput:
+        """Process an instance and return a ModelOutput."""
+        ...

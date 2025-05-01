@@ -84,7 +84,6 @@ async def run_evaluation(
             output = None
             result = None
             if output_dir is not None:
-                record_path = os.path.join(output_dir, f"{instance_id}-{i}-record.json")
                 instance_output_path = os.path.join(
                     output_dir, f"{instance_id}-{i}-output.json"
                 )
@@ -98,14 +97,13 @@ async def run_evaluation(
                 if not overwrite_results:
                     result = _load_cached_results(instance_results_path)
             else:
-                record_path = None
                 instance_output_path = None
                 instance_results_path = None
 
             # Generate new output if needed
             wrote_output = False
             if output is None:
-                output = await model.generate(instance, record_path)
+                output = await model(instance, output_dir, replicate=i)
                 if instance_output_path is not None:
                     wrote_output = True
                     _save_output(output, instance_output_path)

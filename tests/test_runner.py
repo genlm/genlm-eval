@@ -1,8 +1,9 @@
-import pytest
-from unittest.mock import AsyncMock, MagicMock
+import re
 import os
 import json
+import pytest
 import tempfile
+from unittest.mock import MagicMock
 from genlm.eval.core.runner import run_evaluation
 from genlm.eval.core.model import ModelOutput, ModelResponse
 
@@ -18,11 +19,20 @@ def mock_dataset():
 
 @pytest.fixture
 def mock_model():
-    model = AsyncMock()
-    model.generate.return_value = ModelOutput(
-        responses=[ModelResponse(text="test output", prob=0.8, metadata={"time": 1.0})],
-        runtime_seconds=1.0,
-    )
+    n_calls = 0
+
+    async def model(*args, **kwargs):
+        nonlocal n_calls
+        n_calls += 1
+        return ModelOutput(
+            responses=[
+                ModelResponse(text="test output", prob=0.8, metadata={"time": 1.0})
+            ],
+            runtime_seconds=1.0,
+        )
+
+    # Attach the counter to the function so tests can access it
+    model.n_calls = lambda: n_calls
     return model
 
 
@@ -104,7 +114,7 @@ async def test_evaluation_with_existing_output(
             overwrite_outputs=False,
         )
 
-        mock_model.generate.assert_not_called()
+        assert mock_model.n_calls() == 0
 
 
 @pytest.mark.asyncio
@@ -112,7 +122,10 @@ async def test_invalid_overwrite_configuration(
     mock_dataset, mock_model, mock_evaluator
 ):
     with pytest.raises(
-        ValueError, match="Cannot overwrite output without overwriting results"
+        ValueError,
+        match=re.escape(
+            "Cannot overwrite outputs without overwriting results. (Hint: set overwrite_results=True)"
+        ),
     ):
         await run_evaluation(
             dataset=mock_dataset,
@@ -144,7 +157,7 @@ async def test_evaluation_with_existing_results_only(
         )
 
         # Model.generate should have been called since there's no output file
-        mock_model.generate.assert_called_once()
+        assert mock_model.n_calls() == 1
         # If we have to write output, the evaluator should have been called
         mock_evaluator.evaluate_ensemble.assert_called_once()
 
@@ -174,7 +187,7 @@ async def test_evaluation_with_invalid_json_files(
         )
 
         # Both generate and evaluate should be called since files were invalid
-        mock_model.generate.assert_called_once()
+        assert mock_model.n_calls() == 1
         mock_evaluator.evaluate_ensemble.assert_called_once()
 
         # Verify new valid files were written
@@ -212,6 +225,6 @@ async def test_evaluation_with_invalid_output_valid_results(
         )
 
         # Generate should be called since output file was invalid
-        mock_model.generate.assert_called_once()
+        assert mock_model.n_calls() == 1
         # Evaluator should be called since output file was overwritten
         mock_evaluator.evaluate_ensemble.assert_called_once()
