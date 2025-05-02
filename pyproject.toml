@@ -15,6 +15,7 @@ requires-python = ">=3.10"
 dependencies = [
     "pydantic",
     "numpy",
+    "vllm<=0.8.3",
     "genlm-control>=0.2.0",
     "pandas",
 ]
