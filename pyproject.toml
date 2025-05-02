@@ -45,7 +45,7 @@ test = [
 docs = [
     "mkdocs",
     "mkdocs-jupyter",
-    "mkdocstrings-python",
+    "mkdocstrings[python]",
     "mkdocs-material",
     "mkdocs-gen-files",
     "mkdocs-literate-nav",
