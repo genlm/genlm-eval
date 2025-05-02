@@ -46,22 +46,24 @@ async def run_evaluation(
     n_replicates=1,
     overwrite_results=False,
     overwrite_outputs=False,
+    max_instances=float("inf"),
     verbosity=0,
 ):
     """Run evaluation on a dataset using the provided model and evaluator.
 
     Args:
         dataset (Dataset): The dataset to evaluate on.
-        model_adaptor (ModelAdaptor): The model adaptor to use for generation.
+        model (ModelAdaptor): The model adaptor to use for generation.
         evaluator (Evaluator): The evaluator to use for prompt generation and evaluation.
         output_dir (str, optional): The directory to save the results. Defaults to None, in which case results are not saved.
         n_replicates (int, optional): Number of times to replicate the evaluation. Defaults to 1.
         overwrite_results (bool, optional): Whether to overwrite existing evaluation results. Defaults to False.
         overwrite_outputs (bool, optional): Whether to overwrite existing output. Defaults to False.
+        max_instances (int, optional): The maximum number of instances to evaluate. Defaults to float("inf").
         verbosity (int, optional): The verbosity of the evaluation. Defaults to 0, which is silent.
 
     Returns:
-        Dict[str, Any]: Aggregated evaluation results.
+        (Dict[str, Any]): Aggregated evaluation results.
     """
     all_results = []
     all_instance_results = []
@@ -75,7 +77,10 @@ async def run_evaluation(
     if output_dir is not None and not os.path.exists(output_dir):
         os.makedirs(output_dir)  # pragma: no cover
 
+    n_instances = 0
     for instance in dataset:
+        n_instances += 1
+
         instance_results = []
         instance_outputs = []
         instance_id = instance.instance_id
@@ -134,6 +139,9 @@ async def run_evaluation(
                 f"Mean weighted accuracy (total): {sum(r['weighted_accuracy'] for r in all_results) / len(all_results)}"
             )
             print()
+
+        if n_instances >= max_instances:
+            break
 
     return {
         "average_weighted_accuracy": sum(r["weighted_accuracy"] for r in all_results)

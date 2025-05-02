@@ -16,12 +16,7 @@ class EvaluationResult(BaseModel):
 
 
 class Evaluator(Generic[T], ABC):
-    """Base class for evaluators that handle response evaluation.
-
-    Args:
-        T: The Pydantic model type that defines the schema for the dataset instances
-        that the evaluator can handle.
-    """
+    """Base class for evaluators that handle response evaluation."""
 
     @abstractmethod
     def evaluate_sample(self, instance, response):
@@ -29,7 +24,7 @@ class Evaluator(Generic[T], ABC):
 
         Args:
             instance (T): The dataset instance being evaluated.
-            response (str): The model's response text.
+            response (Any): The model's response, which is given by the response attribute of a `ModelOutput` object.
 
         Returns:
             (EvaluationResult): The evaluation result.
@@ -49,8 +44,8 @@ class Evaluator(Generic[T], ABC):
         weighted_accuracy = 0.0
         results = []
         for response in output.responses:
-            result = self.evaluate_sample(instance, response.text)
-            weighted_accuracy += result.score * response.prob
+            result = self.evaluate_sample(instance, response.response)
+            weighted_accuracy += result.score * response.weight
             results.append(
                 {
                     "score": result.score,

@@ -1,10 +1,15 @@
-from .spider import SpiderDataset, SpiderEvaluator, SYSTEM_PROMPT, SpiderInstance
+from .spider import (
+    SpiderDataset,
+    SpiderEvaluator,
+    SpiderInstance,
+    default_prompt_formatter,
+)
 from .table_column_potential import SpiderTableColumnVerifier
 
 __all__ = [
+    "SpiderInstance",
     "SpiderDataset",
     "SpiderEvaluator",
     "SpiderTableColumnVerifier",
-    "SYSTEM_PROMPT",
-    "SpiderInstance",
+    "default_prompt_formatter",
 ]

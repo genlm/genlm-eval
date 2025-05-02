@@ -6,8 +6,7 @@ from genlm.control import direct_token_sampler, PromptedLLM
 
 from genlm.eval.core import ModelOutput, ModelResponse, run_evaluation
 from genlm.eval.domains.pattern_matching import (
-    SYSTEM_PROMPT,
-    FEW_SHOT_EXAMPLES,
+    default_prompt_formatter,
     PatternPotential,
     PatternMatchingDataset,
     PatternMatchingInstance,
@@ -77,8 +76,8 @@ def test_evaluator(dataset, evaluator):
         first_instance,
         ModelOutput(
             responses=[
-                ModelResponse(text="a", prob=0.5),
-                ModelResponse(text="b", prob=0.5),
+                ModelResponse(response="a", weight=0.5),
+                ModelResponse(response="b", weight=0.5),
             ],
             runtime_seconds=0.1,
         ),
@@ -92,16 +91,9 @@ def test_run_evaluation(dataset, evaluator):
     LLM = PromptedLLM.from_name("gpt2", backend="hf", eos_tokens=[b"\n", b"\n\n"])
 
     def sampler_factory(instance):
-        prompt = (
-            SYSTEM_PROMPT
-            + "\n"
-            + "\n".join("\n".join(x) for x in FEW_SHOT_EXAMPLES)
-            + "\n"
-            + instance.pattern
+        LLM.prompt_ids = default_prompt_formatter(
+            LLM.model.tokenizer, instance, use_chat_format=False
         )
-
-        LLM.prompt_ids = LLM.model.tokenizer.encode(prompt)
-
         return direct_token_sampler(LLM)
 
     def critic_factory(instance):
@@ -119,7 +111,7 @@ def test_run_evaluation(dataset, evaluator):
 
         return ModelOutput(
             responses=[
-                ModelResponse(text=sequence, prob=prob)
+                ModelResponse(response=sequence, weight=prob)
                 for sequence, prob in sequences.decoded_posterior.items()
             ],
             runtime_seconds=0.1,

@@ -6,7 +6,7 @@ from genlm.control import direct_token_sampler, PromptedLLM
 
 from genlm.eval.core import ModelOutput, ModelResponse, run_evaluation
 from genlm.eval.domains.molecular_synthesis import (
-    SYSTEM_PROMPT,
+    default_prompt_formatter,
     PartialSMILES,
     MolecularSynthesisDataset,
     MolecularSynthesisInstance,
@@ -66,8 +66,8 @@ def test_mol_evaluator(mol_dataset, mol_evaluator):
         first_instance,
         ModelOutput(
             responses=[
-                ModelResponse(text=valid_smiles, prob=0.5),
-                ModelResponse(text=valid_smiles, prob=0.5),
+                ModelResponse(response=valid_smiles, weight=0.5),
+                ModelResponse(response=valid_smiles, weight=0.5),
             ],
             runtime_seconds=0.1,
         ),
@@ -81,8 +81,8 @@ def test_mol_evaluator(mol_dataset, mol_evaluator):
         first_instance,
         ModelOutput(
             responses=[
-                ModelResponse(text="invalid_smiles", prob=0.5),
-                ModelResponse(text=valid_smiles, prob=0.5),
+                ModelResponse(response="invalid_smiles", weight=0.5),
+                ModelResponse(response=valid_smiles, weight=0.5),
             ],
             runtime_seconds=0.1,
         ),
@@ -113,8 +113,7 @@ def test_run_evaluation(mol_dataset, mol_evaluator):
     LLM = PromptedLLM.from_name("gpt2", backend="hf")
 
     def sampler_factory(instance):
-        prompt = SYSTEM_PROMPT + "\n" + "\n".join(instance.molecules)
-        LLM.prompt_ids = LLM.model.tokenizer.encode(prompt)
+        LLM.prompt_ids = default_prompt_formatter(LLM.model.tokenizer, instance)
         return direct_token_sampler(LLM)
 
     def critic_factory(instance):
@@ -132,7 +131,7 @@ def test_run_evaluation(mol_dataset, mol_evaluator):
 
         return ModelOutput(
             responses=[
-                ModelResponse(text=sequence, prob=prob)
+                ModelResponse(response=sequence, weight=prob)
                 for sequence, prob in sequences.decoded_posterior.items()
             ],
             runtime_seconds=0.1,

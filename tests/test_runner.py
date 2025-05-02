@@ -26,7 +26,9 @@ def mock_model():
         n_calls += 1
         return ModelOutput(
             responses=[
-                ModelResponse(text="test output", prob=0.8, metadata={"time": 1.0})
+                ModelResponse(
+                    response="test output", weight=0.8, metadata={"time": 1.0}
+                )
             ],
             runtime_seconds=1.0,
         )
@@ -98,7 +100,9 @@ async def test_evaluation_with_existing_output(
         # Create existing output file
         instance_output = ModelOutput(
             responses=[
-                ModelResponse(text="existing output", prob=0.8, metadata={"time": 2.0})
+                ModelResponse(
+                    response="existing output", weight=0.8, metadata={"time": 2.0}
+                )
             ],
             runtime_seconds=2.0,
         )

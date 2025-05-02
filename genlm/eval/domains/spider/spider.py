@@ -8,6 +8,7 @@ from .spider_eval.dialogue import load_spider_data
 from .spider_eval.schema import load_schemas
 from .spider_eval.evaluator import Evaluator as BaseSpiderEvaluator
 
+from genlm.eval.util import chat_template_messages
 from genlm.eval.core import Evaluator, EvaluationResult, Instance, Dataset
 
 
@@ -26,6 +27,7 @@ class SpiderInstance(Instance):
     lark_grammar: Union[str, None]
     few_shot_examples: List[tuple]
     tables: List
+    user_message: str
 
     def __str__(self):
         return f"utterance: {self.utterance}, schema_name: {self.schema_name} (id: {self.instance_id})"
@@ -84,24 +86,29 @@ class SpiderDataset(Dataset[SpiderInstance]):
         train_data = load_spider_data(raw_spider_dir / "train_spider.json")
 
         if grammar_json_path is None:
-            grammar_json_path = Path(__file__).parent / "grammars.json"
-
-        with open(grammar_json_path, "r") as f:
-            grammars = json.load(f)
+            grammars = None
+        else:
+            with open(grammar_json_path, "r") as f:
+                grammars = json.load(f)
 
         return cls(dev_data, spider_schemas, train_data, grammars, **kwargs)
 
     def __iter__(self):
         for instance_id, dev_datum in enumerate(self.dev_data):
+            schema_str = serialize_schema(self.spider_schemas[dev_datum.schema_name])
             yield SpiderInstance(
                 schema_name=dev_datum.schema_name,
-                schema_str=serialize_schema(self.spider_schemas[dev_datum.schema_name]),
+                schema_str=schema_str,
                 lark_grammar=self.grammars.get(dev_datum.schema_name),
                 utterance=dev_datum.utterance,
                 gold=dev_datum.query,
                 instance_id=instance_id,
                 few_shot_examples=self.few_shot_examples,
                 tables=self.spider_schemas[dev_datum.schema_name].tables,
+                user_message=self.user_message_template(
+                    schema_str,
+                    dev_datum.utterance,
+                ),
             )
 
     @property
@@ -156,3 +163,46 @@ SYSTEM_PROMPT = (
     "You do not provide any commentary or explanation of what the code does, "
     "just the SQL statement ending in a semicolon."
 )
+
+
+def default_prompt_formatter(
+    tokenizer,
+    instance,
+    use_chat_format=True,
+    system_prompt=SYSTEM_PROMPT,
+):
+    """Default prompt formatter for pattern matching.
+
+    Args:
+        tokenizer (Tokenizer): The tokenizer to use.
+        instance (SpiderInstance): The instance to format.
+        use_chat_format (bool): Whether to use chat format.
+        system_prompt (str): The system prompt to use.
+
+    Returns:
+        (list[int]): The prompt ids.
+    """
+    if use_chat_format:
+        return tokenizer.apply_chat_template(
+            messages=chat_template_messages(
+                system_prompt,
+                instance.few_shot_examples,
+                instance.user_message,
+            ),
+            tokenize=True,
+            add_generation_prompt=True,
+        )
+    else:
+        return tokenizer.encode(
+            (
+                system_prompt
+                + "\n\n"
+                + "\n\n".join(
+                    f"{input}\nSQL query: {output}"
+                    for input, output in instance.few_shot_examples
+                )
+                + "\n\n"
+                + instance.user_message
+                + "\nSQL query:"
+            )
+        )

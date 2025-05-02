@@ -1,13 +1,13 @@
 from pydantic import BaseModel
-from typing import List, Dict, Any, Protocol, runtime_checkable, Optional
+from typing import List, Dict, Any, Protocol, Optional
 from .dataset import Instance
 
 
 class ModelResponse(BaseModel):
     """Single model response containing generated text, probability, and optional metadata."""
 
-    text: str
-    prob: float
+    response: Any
+    weight: float
     metadata: Optional[Dict[str, Any]] = None
 
 
@@ -15,11 +15,10 @@ class ModelOutput(BaseModel):
     """Collection of model responses with execution metadata."""
 
     responses: List[ModelResponse]
-    runtime_seconds: float
+    runtime_seconds: Optional[float] = None
     metadata: Optional[Dict[str, Any]] = None
 
 
-@runtime_checkable
 class ModelAdaptor(Protocol):
     """Protocol for async model adapters that process instances into model outputs."""
 

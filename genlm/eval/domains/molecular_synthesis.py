@@ -149,3 +149,35 @@ class PartialSMILES(Potential):
             return 0.0
         except Exception:
             return -np.inf
+
+
+def default_prompt_formatter(
+    tokenizer,
+    instance,
+    use_chat_format=False,
+    system_prompt=SYSTEM_PROMPT,
+):
+    """Default prompt formatter for molecular synthesis.
+
+    Args:
+        tokenizer (Tokenizer): The tokenizer to use.
+        instance (MolecularSynthesisInstance): The instance to format.
+        use_chat_format (bool): Whether to use chat format.
+        system_prompt (str): The system prompt to use.
+
+    Returns:
+        (list[int]): The prompt ids.
+    """
+    if use_chat_format:
+        raise NotImplementedError(
+            "Chat format not implemented for molecular synthesis."
+        )
+    else:
+        prompt_ids = tokenizer.encode(
+            system_prompt
+            + "\n"
+            + "\n".join("Molecule: " + x for x in instance.molecules)
+            + "\nMolecule:"
+        )
+
+    return prompt_ids

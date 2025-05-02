@@ -8,19 +8,31 @@ from genlm.eval.domains.spider import (
     SpiderDataset,
     SpiderInstance,
     SpiderEvaluator,
-    SYSTEM_PROMPT,
+    default_prompt_formatter,
     SpiderTableColumnVerifier,
 )
 
 
 @pytest.fixture
-def spider_data_dir():
-    return Path(__file__).parent / "data/spider_data"
+def spider_dir():
+    return Path(__file__).parent.parent / "assets" / "spider"
 
 
 @pytest.fixture
-def spider_dataset(spider_data_dir):
-    return SpiderDataset.from_spider_dir(spider_data_dir, few_shot_example_ids=[0, 1])
+def spider_data_dir(spider_dir):
+    return spider_dir / "spider_sample"
+
+
+@pytest.fixture
+def spider_grammars(spider_dir):
+    return spider_dir / "grammars.json"
+
+
+@pytest.fixture
+def spider_dataset(spider_data_dir, spider_grammars):
+    return SpiderDataset.from_spider_dir(
+        spider_data_dir, grammar_json_path=spider_grammars, few_shot_example_ids=[0, 1]
+    )
 
 
 @pytest.fixture
@@ -46,8 +58,8 @@ def test_spider_evaluator(spider_dataset, spider_evaluator):
         first_instance,
         ModelOutput(
             responses=[
-                ModelResponse(text="SELECT count(*) FROM singer", prob=0.5),
-                ModelResponse(text="SELECT count(*) FROM singer", prob=0.5),
+                ModelResponse(response="SELECT count(*) FROM singer", weight=0.5),
+                ModelResponse(response="SELECT count(*) FROM singer", weight=0.5),
             ],
             runtime_seconds=0.1,
         ),
@@ -60,8 +72,8 @@ def test_spider_evaluator(spider_dataset, spider_evaluator):
         first_instance,
         ModelOutput(
             responses=[
-                ModelResponse(text="SELECT count(*) FROM siner", prob=0.5),
-                ModelResponse(text="SELECT count(*) FROM singer", prob=0.5),
+                ModelResponse(response="SELECT count(*) FROM siner", weight=0.5),
+                ModelResponse(response="SELECT count(*) FROM singer", weight=0.5),
             ],
             runtime_seconds=0.1,
         ),
@@ -75,15 +87,9 @@ def test_run_evaluation(spider_dataset, spider_evaluator):
     LLM = PromptedLLM.from_name("gpt2", backend="hf", eos_tokens=[b"\n", b"\n\n"])
 
     def sampler_factory(instance):
-        prompt = (
-            SYSTEM_PROMPT
-            + "\n"
-            + "\n".join("\n".join(x) for x in instance.few_shot_examples)
-            + "\n"
-            + instance.utterance
+        LLM.prompt_ids = default_prompt_formatter(
+            LLM.model.tokenizer, instance, use_chat_format=False
         )
-
-        LLM.prompt_ids = LLM.model.tokenizer.encode(prompt)
 
         return direct_token_sampler(LLM)
 
@@ -105,7 +111,7 @@ def test_run_evaluation(spider_dataset, spider_evaluator):
 
         return ModelOutput(
             responses=[
-                ModelResponse(text=sequence, prob=prob)
+                ModelResponse(response=sequence, weight=prob)
                 for sequence, prob in sequences.decoded_posterior.items()
             ],
             runtime_seconds=0.1,

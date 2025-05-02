@@ -13,11 +13,7 @@ T = TypeVar("T", bound=Instance)
 
 
 class Dataset(Generic[T], ABC):
-    """Base class for datasets that yield instances conforming to a Pydantic schema.
-
-    Args:
-        T: The Pydantic model type that defines the schema for dataset instances.
-    """
+    """Base class for datasets that yield instances conforming to a Pydantic schema."""
 
     @abstractmethod
     def __iter__(self) -> Iterator[T]:

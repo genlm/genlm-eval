@@ -2,7 +2,7 @@ import regex
 import string
 import pandas as pd
 from genlm.control import Potential
-
+from genlm.eval.util import chat_template_messages
 from genlm.eval.core import Dataset, Instance, Evaluator, EvaluationResult
 
 
@@ -128,3 +128,47 @@ SYSTEM_PROMPT = (
     "You are a helpful assistant that generates strings matching regular expressions. "
     + "Only output the exact string that matches the regex pattern, nothing more."
 )
+
+
+def default_prompt_formatter(
+    tokenizer,
+    instance,
+    use_chat_format=False,
+    system_prompt=SYSTEM_PROMPT,
+    few_shot_examples=FEW_SHOT_EXAMPLES,
+):
+    """Default prompt formatter for pattern matching.
+
+    Args:
+        tokenizer (Tokenizer): The tokenizer to use.
+        instance (PatternMatchingInstance): The instance to format.
+        use_chat_format (bool): Whether to use chat format.
+        system_prompt (str): The system prompt to use.
+        few_shot_examples (list[tuple[str, str]]): The few shot examples to use. Each example is a tuple of (pattern, response).
+
+    Returns:
+        (list[int]): The prompt ids.
+    """
+    if use_chat_format:
+        return tokenizer.apply_chat_template(
+            messages=chat_template_messages(
+                system_prompt,
+                few_shot_examples,
+                instance.pattern,
+            ),
+            tokenize=True,
+            add_generation_prompt=True,
+        )
+    else:
+        return tokenizer.encode(
+            (
+                system_prompt
+                + "\n"
+                + "\n".join(
+                    f"Pattern: {input}\nOutput: {output}"
+                    for input, output in few_shot_examples
+                )
+                + "\n"
+                + instance.pattern
+            )
+        )
