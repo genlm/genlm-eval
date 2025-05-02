@@ -44,7 +44,6 @@ test = [
 
 docs = [
     "mkdocs",
-    "markdown-exec[ansi]",
     "mkdocs-jupyter",
     "mkdocstrings-python",
     "mkdocs-material",
