@@ -184,7 +184,7 @@ def default_prompt_formatter(
     """
     if use_chat_format:
         return tokenizer.apply_chat_template(
-            messages=chat_template_messages(
+            conversation=chat_template_messages(
                 system_prompt,
                 instance.few_shot_examples,
                 instance.user_message,
