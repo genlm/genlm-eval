@@ -1,9 +1,9 @@
 ![Logo](assets/logo.png)
 
 <p align="center">
-<a href="https://genlm.github.io/genlm-eval/"><img alt="Docs" src="https://github.com/genlm/genlm-eval/actions/workflows/docs.yml/badge.svg"/></a>
-<a href="https://genlm.github.io/genlm-eval/"><img alt="Tests" src="https://github.com/genlm/genlm-eval/actions/workflows/pytest.yml/badge.svg"/></a>
-<a href="https://codecov.io/github/genlm/genlm-eval" >  <img src="https://codecov.io/github/genlm/genlm-eval/graph/badge.svg?token=3JuGDDv42y"/></a>
+<a href="https://genlm.github.io/genlm-eval/"><img src="https://github.com/genlm/genlm-eval/actions/workflows/docs.yml/badge.svg"/></a>
+<a href="https://genlm.github.io/genlm-eval/"><img src="https://github.com/genlm/genlm-eval/actions/workflows/pytest.yml/badge.svg"/></a>
+<a href="https://codecov.io/github/genlm/genlm-eval"><img src="https://codecov.io/github/genlm/genlm-eval/graph/badge.svg?token=3JuGDDv42y"/></a>
 </p>
 
 A flexible framework for evaluating constrained generation models, built for the GenLM ecosystem. This library provides standardized interfaces and benchmarks for assessing model performance across various constrained generation tasks.
