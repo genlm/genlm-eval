@@ -37,4 +37,4 @@ cd genlm-eval
 pip install -e .
 ```
 
-For domain-specific dependencies, refer to the [examples and tutorials](https://genlm.github.io/genlm-eval/cookbook/).
+For domain-specific dependencies, refer to the cookbook in the [docs](https://genlm.github.io/genlm-eval/).
