@@ -8,12 +8,6 @@
 
 A flexible framework for evaluating constrained generation models, built for the GenLM ecosystem. This library provides standardized interfaces and benchmarks for assessing model performance across various constrained generation tasks.
 
-## Features
-
-- **Standardized Interfaces**: Define and evaluate constrained generation tasks using a consistent API.
-- **Benchmarking**: Compare model performance across multiple domains and metrics.
-- **Customizable**: Create custom evaluation domains and models.
-
 ## Documentation
 
 - **Getting Started**: Visit our [documentation](https://genlm.github.io/genlm-eval/) for installation and usage guides.
