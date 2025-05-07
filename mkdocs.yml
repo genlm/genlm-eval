@@ -33,6 +33,7 @@ nav:
   - Home: index.md
   - API Reference: reference/
   - Cookbook:
+    - Overview: cookbook/cookbook.md
     - Supported Domains:
       - Pattern Matching: cookbook/domains/pattern_matching.ipynb
       - Text to SQL (Spider): cookbook/domains/spider.ipynb
