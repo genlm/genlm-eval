@@ -11,6 +11,7 @@ This cookbook provides examples of how to use `genlm-eval` for evaluating constr
 
 ### Custom Domains
 Learn how to extend `genlm-eval` to evaluate models on your own custom domains. This example walks through:
+
 - Defining a dataset schema
 - Implementing an evaluator
 - Creating a model adaptor
@@ -22,6 +23,7 @@ Learn how to extend `genlm-eval` to evaluate models on your own custom domains. 
 
 #### Pattern Matching
 Evaluate models on generating strings that match complex pattern specifications:
+
 - Task: Generate strings conforming to expressive pattern-matching specifications
 - Data: 400+ pattern-matching specifications with features beyond regular expressions
 
@@ -29,6 +31,7 @@ Evaluate models on generating strings that match complex pattern specifications:
 
 #### Molecular Synthesis
 Evaluate models on generating valid molecular structures:
+
 - Task: Generate drug-like compounds using SMILES notation
 - Data: Few-shot prompts from GDB-17 database
 
@@ -36,6 +39,7 @@ Evaluate models on generating valid molecular structures:
 
 #### Text to SQL (Spider)
 Evaluate models on generating SQL queries from natural language:
+
 - Task: Generate SQL queries from natural language questions
 - Data: Spider dataset with database schemas
 
