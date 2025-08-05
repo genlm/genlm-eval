@@ -25,15 +25,11 @@ jobs:
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
 
-      - name: Create uv venv
+      - name: Run Tests
         run: |
           uv venv --python 3.11
           source .venv/bin/activate
-
-      - name: Run Tests
-        run: |
           uv pip install -e .[test,spider,molecules,pattern_matching,json_schema_bench]
-          uv pip install nltk
           python -m nltk.downloader punkt_tab
           pytest tests --cov=genlm/eval --cov-report=json
 
