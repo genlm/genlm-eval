@@ -10,7 +10,7 @@ version = "0.1.0"
 description = "Evaluation framework for models in the GenLM ecosystem"
 authors = []
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 dependencies = [
     "pydantic",
@@ -35,6 +35,11 @@ molecules = [
     "genlm-control>=0.2.1",
     "rdkit",
     "partialsmiles",
+]
+
+json_schema_bench = [
+    "datasets",
+    "jsonschema"
 ]
 
 test = [
