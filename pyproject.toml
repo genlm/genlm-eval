@@ -38,7 +38,7 @@ molecules = [
 ]
 
 json_schema_bench = [
-    "datasets",
+    "datasets>=4.0.0",
     "jsonschema"
 ]
 
