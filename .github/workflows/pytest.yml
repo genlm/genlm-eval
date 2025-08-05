@@ -10,6 +10,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-22.04
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
