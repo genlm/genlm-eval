@@ -10,6 +10,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-22.04
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
@@ -21,11 +23,15 @@ jobs:
           python-version: 3.11.5
           cache: 'pip'
 
+      - name: Install UV
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+
       - name: Run Tests
         run: |
-          python -m venv venv
-          source venv/bin/activate
-          pip install -e .[test,spider,molecules,pattern_matching]
+          uv venv --python 3.11
+          source .venv/bin/activate
+          uv pip install -e .[test,spider,molecules,pattern_matching,json_schema_bench]
           python -m nltk.downloader punkt_tab
           pytest tests --cov=genlm/eval --cov-report=json
 
