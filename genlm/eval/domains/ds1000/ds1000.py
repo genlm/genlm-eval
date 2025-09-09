@@ -106,13 +106,17 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
 
     def decode_solution(self, s: str) -> str:
         t = s.strip()
-        # Decode tuple/list of bytes -> TODO re-check
         try:
             obj = ast.literal_eval(t)
-            if isinstance(obj, (list, tuple)) and all(isinstance(x, (bytes, bytearray)) for x in obj):
+            if isinstance(obj, (bytes, bytearray)):
+                t = obj.decode("utf-8", "replace")
+            elif isinstance(obj, (list, tuple)) and all(isinstance(x, (bytes, bytearray)) for x in obj):
                 t = b"".join(obj).decode("utf-8", "replace")
         except Exception:
             pass
+        stop_words = ["</code>", "# SOLUTION", "SOLUTION", "END"]
+        for stop_word in stop_words:
+            t = t.split(stop_word)[0]
         return t
 
     def assigns_result(self, code: str) -> bool:
@@ -130,7 +134,6 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
     def evaluate_sample(self, instance: DS1000Instance, response: str) -> EvaluationResult:
         solution_raw = response.strip()
         solution = self.decode_solution(solution_raw)
-        
         if not solution:
             return EvaluationResult(score=0.0, desc="empty solution")
 
@@ -140,23 +143,8 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
         # Summarize with clear sections, trim to max_log_chars
         def _trim(s: str) -> str:
             return s if len(s) <= self.max_log_chars else (s[:self.max_log_chars] + "\n...[truncated]")
-
-        desc_lines = [
-            f"result={'PASS' if ok else 'FAIL'} rc={rc}",
-            "",
-            "=== MODEL_SOLUTION (first lines) ===",
-            _trim(solution),
-            "",
-            "=== HARNESS_SCRIPT (first lines) ===",
-            _trim(script),
-            "",
-            "=== STDOUT ===",
-            _trim(out),
-            "",
-            "=== STDERR ===",
-            _trim(err),
-        ]
-        desc = "\n".join(desc_lines)
+        
+        desc = _trim(solution)
 
         return EvaluationResult(score=1.0 if ok else 0.0, desc=desc)
 
@@ -227,7 +215,6 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
             pass_line = bool(self._re_pass.search(out))
             fail_line = bool(self._re_fail.search(out)) or bool(self._re_fail.search(err))
             ok = (rc == 0) and pass_line and (not fail_line)
-
             return (ok, rc, out.strip(), err.strip())
     
 
@@ -235,8 +222,12 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
 # Prompt formatter (LM)  #
 ##########################
 
-
 DS1000_SYSTEM_PROMPT = ("") # Keep empty for now
 
-def default_prompt_formatter(tokenizer, instance: DS1000Instance, system_prompt: str = DS1000_SYSTEM_PROMPT) -> List[int]:
-    return tokenizer.encode(system_prompt+instance.prompt)
+def default_prompt_formatter(
+        tokenizer,
+        instance: DS1000Instance,
+        system_prompt: str = DS1000_SYSTEM_PROMPT, # Currently unused
+        use_chat_format: bool = False # needed for to conform with evaluator interface
+    ) -> List[int]:
+    return tokenizer.encode(system_prompt + instance.prompt)
