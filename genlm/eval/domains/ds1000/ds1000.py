@@ -104,20 +104,14 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
         self._re_pass = re.compile(r'(?m)^\s*<<<DS1000_PASS>>>\s*$')
         self._re_fail = re.compile(r'(?m)^\s*<<<DS1000_FAIL>>>\b')
 
-    def decode_solution(self, s: str) -> str:
-        t = s.strip()
-        try:
-            obj = ast.literal_eval(t)
-            if isinstance(obj, (bytes, bytearray)):
-                t = obj.decode("utf-8", "replace")
-            elif isinstance(obj, (list, tuple)) and all(isinstance(x, (bytes, bytearray)) for x in obj):
-                t = b"".join(obj).decode("utf-8", "replace")
-        except Exception:
-            pass
-        stop_words = ["</code>", "# SOLUTION", "SOLUTION", "END"]
-        for stop_word in stop_words:
-            t = t.split(stop_word)[0]
-        return t
+    def postprocess_code(self, t: str) -> str:
+        t = t.split('</code>')[0]
+        t = t.replace('```python', '')
+        t = t.split('```')[0]
+        t = t.split('\nEND SOLUTION')[0]
+        t = t.replace('<code>', '')
+        t = t.replace('S HERE', '')
+        return t.strip()
 
     def assigns_result(self, code: str) -> bool:
         try:
@@ -132,21 +126,19 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
         return False
     
     def evaluate_sample(self, instance: DS1000Instance, response: str) -> EvaluationResult:
-        solution_raw = response.strip()
-        solution = self.decode_solution(solution_raw)
+        solution = self.postprocess_code(response)
         if not solution:
-            return EvaluationResult(score=0.0, desc="empty solution")
+            return EvaluationResult(score=0.0, desc="empty solution", metadata=instance.metadata)
 
         script = self._build_harness_script(instance.code_context, solution)
-        ok, rc, out, err = self._run_in_subprocess(script)
+        ok, _, _, _ = self._run_in_subprocess(script)
 
         # Summarize with clear sections, trim to max_log_chars
         def _trim(s: str) -> str:
             return s if len(s) <= self.max_log_chars else (s[:self.max_log_chars] + "\n...[truncated]")
-        
-        desc = _trim(solution)
 
-        return EvaluationResult(score=1.0 if ok else 0.0, desc=desc)
+        desc = _trim(solution)
+        return EvaluationResult(score=1.0 if ok else 0.0, desc=desc, metadata=instance.metadata)
 
     def _build_harness_script(self, code_context: str, solution: str) -> str:
         """Load test_execution() and run it with solution."""
@@ -192,8 +184,8 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
                 f.write(script + "\n")
 
             # Create command and environment
-            cmd = [self.python_executable, "-I", path]
-            env = {**os.environ, **self.extra_env}
+            cmd = [self.python_executable, path]
+            env = {**os.environ, **self.extra_env, "MPLBACKEND": "Agg"}
 
             try:
                 proc = subprocess.run(
