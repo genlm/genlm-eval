@@ -7,7 +7,6 @@ import subprocess
 import sys
 import ast
 import textwrap
-import re
 import tempfile
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple, Type
 
@@ -16,6 +15,19 @@ from datasets import load_dataset
 from genlm.eval.core import EvaluationResult, Instance, Dataset, Evaluator
 
 log = logging.getLogger(__name__)
+
+################
+#    Helper    #
+################
+
+def postprocess_code(t: str) -> str:
+    # Process code as in https://github.com/xlang-ai/DS-1000/blob/main/test_ds1000.py
+    t = t.split('</code>')[0]
+    t = t.replace('```python', '')
+    t = t.split('```')[0]
+    t = t.split('\nEND SOLUTION')[0]
+    t = t.replace('<code>', '')
+    return t.strip()
 
 ################
 # DS-1000 Data #
@@ -94,24 +106,19 @@ class DS1000Dataset(Dataset[DS1000Instance]):
 ################
 
 class DS1000Evaluator(Evaluator[DS1000Instance]):
-    def __init__(self, python_executable: Optional[str] = None, timeout_seconds: float = 15.0,
-                 extra_env: Optional[Dict[str, str]] = None, max_log_chars: int = 4000) -> None:
+    def __init__(
+            self, python_executable: Optional[str] = None,
+            timeout_seconds: float = 15.0,
+            extra_env: Optional[Dict[str, str]] = None,
+            max_log_chars: int = 4000
+        ) -> None:
         self.python_executable = python_executable or sys.executable
         self.timeout_seconds = float(timeout_seconds)
         self.extra_env = dict(extra_env or {})
         self.max_log_chars = int(max_log_chars)
         # Markers for detecting PASS/FAIL in output
-        self._re_pass = re.compile(r'(?m)^\s*<<<DS1000_PASS>>>\s*$')
-        self._re_fail = re.compile(r'(?m)^\s*<<<DS1000_FAIL>>>\b')
-
-    def postprocess_code(self, t: str) -> str:
-        t = t.split('</code>')[0]
-        t = t.replace('```python', '')
-        t = t.split('```')[0]
-        t = t.split('\nEND SOLUTION')[0]
-        t = t.replace('<code>', '')
-        t = t.replace('S HERE', '')
-        return t.strip()
+        self.marker_pass = "<<<DS1000_PASS>>>"
+        self.marker_fail = "<<<DS1000_FAIL>>>"
 
     def assigns_result(self, code: str) -> bool:
         try:
@@ -126,7 +133,7 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
         return False
     
     def evaluate_sample(self, instance: DS1000Instance, response: str) -> EvaluationResult:
-        solution = self.postprocess_code(response)
+        solution = postprocess_code(response)
         if not solution:
             return EvaluationResult(score=0.0, desc="empty solution", metadata=instance.metadata)
 
@@ -142,8 +149,6 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
 
     def _build_harness_script(self, code_context: str, solution: str) -> str:
         """Load test_execution() and run it with solution."""
-        marker_pass = "<<<DS1000_PASS>>>"
-        marker_fail = "<<<DS1000_FAIL>>>"
         return textwrap.dedent(f"""
         # -*- coding: utf-8 -*-
         import sys, traceback
@@ -154,26 +159,26 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
         try:
             exec(code_context, g, g)
         except BaseException as e:
-            print("{marker_fail} HARNESS_EXEC_ERROR:", repr(e), flush=True)
+            print("{self.marker_fail} HARNESS_EXEC_ERROR:", repr(e), flush=True)
             traceback.print_exc()
             sys.exit(1)
 
         test_execution = g.get("test_execution")
         if not callable(test_execution):
-            print("{marker_fail} MISSING_test_execution", flush=True)
+            print("{self.marker_fail} MISSING_test_execution", flush=True)
             sys.exit(1)
 
         try:
             _ret = test_execution(solution)
             if _ret is False:
-                print("{marker_fail} TEST_RETURNED_FALSE", flush=True)
+                print("{self.marker_fail} TEST_RETURNED_FALSE", flush=True)
                 sys.exit(3)
         except Exception as e:
-            print("{marker_fail}", repr(e), flush=True)
+            print("{self.marker_fail}", repr(e), flush=True)
             traceback.print_exc()
             sys.exit(2)
 
-        print("{marker_pass}", flush=True)
+        print("{self.marker_pass}", flush=True)
         sys.exit(0)
         """).strip()
 
@@ -203,9 +208,8 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
             out = proc.stdout or ""
             err = proc.stderr or ""
             rc = int(proc.returncode)
-
-            pass_line = bool(self._re_pass.search(out))
-            fail_line = bool(self._re_fail.search(out)) or bool(self._re_fail.search(err))
+            pass_line = bool(self.marker_pass in out)
+            fail_line = bool(self.marker_fail in out) or bool(self.marker_fail in err)
             ok = (rc == 0) and pass_line and (not fail_line)
             return (ok, rc, out.strip(), err.strip())
     

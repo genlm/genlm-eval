@@ -1,23 +1,25 @@
 from typing import List
-import ast
 import subprocess
 import sys
 import textwrap
 import os
+import codeop
 
 from genlm.control import Potential
+from genlm.eval.domains.ds1000.ds1000 import postprocess_code
 
 class DS1000RuntimeNoErrorPotential(Potential):
     """
     DS-1000 expensive potential: execute the harness on a complete prefix.
     Return 0.0 if no error, -inf otherwise.
     """
-    def __init__(self, vocabulary=None, code_context:str="", timeout_seconds:float=3.0):
+    def __init__(self, vocabulary=None, code_context:str="", timeout_seconds:float=3.0, postprocess_code=True):
         vocabulary = vocabulary or [bytes([i]) for i in range(256)]
         super().__init__(vocabulary=vocabulary)
         self.timeout_seconds = float(timeout_seconds)
         self.code_context = code_context
-
+        self.postprocess_code = postprocess_code
+    
     def coerce(self, other, f=None, prune=True):
         # Overwrite coerce to adopt the LLM vocabulary without mapping tokens.
         return DS1000RuntimeNoErrorPotential(
@@ -25,46 +27,51 @@ class DS1000RuntimeNoErrorPotential(Potential):
             code_context=self.code_context,
             timeout_seconds=self.timeout_seconds,
         )
+    
+    def _bytes_to_str(self, toks):
+        if not toks:
+            return ""
+        try:
+            bytes_str = b"".join(toks).decode("utf-8", errors="ignore")
+        except UnicodeDecodeError:
+            bytes_str = b"".join(toks).decode("latin-1", errors="ignore")
+        return bytes_str
 
     async def prefix(self, context: List[bytes]) -> float:
         code = self._bytes_to_str(context)
-
-        # Gate at statement boundaries (no truncation) TODO check
-        #code = self._truncate_to_complete_statements(code)
         if not code.endswith("\n"):
             return 0.0
-        if not self._is_complete_python(code):
+        if not self._compile_is_complete(code):
             return 0.0
+        code = postprocess_code(code) if self.postprocess_code else code
+        out = await self._score_no_error(code)
+        return out
 
-        return await self._score_no_error(code)
-
-    async def complete(self, context: List[bytes]) -> float:
-        return await self.prefix(context)
-
-    def _bytes_to_str(self, toks: List[bytes]) -> str:
-        return b"".join(toks).decode("utf-8", errors="ignore") if toks else ""
-
-    def _is_complete_python(self, code: str) -> bool:
+    def _compile_is_complete(self, src: str) -> bool:
+        # Returns True if src is a complete, compilable 'exec' suite
         try:
-            ast.parse(code, mode="exec")
-            return True
-        except SyntaxError:
+            return codeop.compile_command(src, symbol="exec") is not None
+        except (SyntaxError, ValueError, OverflowError):
             return False
 
     def _truncate_to_complete_statements(self, code: str) -> str:
-        # TODO check if we should truncate to complete statements
-        s = code
-        if not s.strip():
+        # Longest prefix that compiles as a complete suite; else "".
+        if not code.strip():
             return ""
-        if self._is_complete_python(s):
-            return s
-        while True:
-            nl = s.rfind("\n")
-            if nl <= 0:
-                return ""
-            s = s[:nl].rstrip()
-            if self._is_complete_python(s):
-                return s
+        # Fast path
+        if self._compile_is_complete(code):
+            return code
+        # Back off by lines until something compiles
+        lines = code.splitlines(keepends=True)
+        for end in range(len(lines) - 1, -1, -1):
+            cand = "".join(lines[:end])
+            if cand.strip() and self._compile_is_complete(cand):
+                return cand
+        return ""
+    
+
+    async def complete(self, context):
+        return await self.prefix(context)
 
     async def _score_no_error(self, complete_code: str) -> float:
         if complete_code.strip() == "":
@@ -75,6 +82,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
         import sys, traceback, warnings, os
         warnings.filterwarnings("ignore")
         os.environ.setdefault("PYTHONWARNINGS", "ignore")
+        os.environ.setdefault("MPLBACKEND", "Agg")
 
         code_context = {self.code_context!r}
         solution = {complete_code!r}
@@ -82,20 +90,19 @@ class DS1000RuntimeNoErrorPotential(Potential):
 
         try:
             g = {{}}
-            exec(code_context, g, g)  # defines test_execution
+            exec(code_context, g, g)  # defines test_execution(solution)
             te = g.get("test_execution")
-            if callable(te):
-                try:
-                    te(solution)
-                    print(OK)
-                except (AssertionError, KeyError, NameError):
-                    # Treat harness correctness checks & missing `result` as non-fatal
-                    print(OK)
-                except BaseException:
-                    print(BAD)
-            else:
-                # No harness present
+            if not callable(te):
+                print(BAD); raise SystemExit(0)
+            try:
+                te(solution)
+                # If we get here with no exception, it ran without runtime error.
                 print(OK)
+            except AssertionError:
+                # Treat harness correctness checks & missing `result` as non-fatal
+                print(OK)
+            except BaseException:
+                print(BAD)
         except BaseException:
             print(BAD)
         """).strip()
@@ -105,7 +112,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
                 [sys.executable, "-c", script],
                 check=False, capture_output=True, text=True,
                 timeout=self.timeout_seconds,
-                env=os.environ.copy(),
+                env={**os.environ, "MPLBACKEND": "Agg"},
             )
         except subprocess.TimeoutExpired:
             return float("-inf")
@@ -115,18 +122,3 @@ class DS1000RuntimeNoErrorPotential(Potential):
         bad = any(line.strip().startswith(BAD) for line in out.splitlines())
         return 0.0 if ok and not bad else float("-inf")
 
-
-class TrivialPotential(Potential):
-    """Trivial efficient potential."""
-    def __init__(self, vocabulary: List[bytes]=None):
-        vocabulary = vocabulary or [bytes([i]) for i in range(256)]
-        super().__init__(vocabulary=vocabulary)
-
-    def coerce(self, other, f=None, prune=True):
-        return TrivialPotential(list(other.vocab))
-
-    async def prefix(self, context: List[bytes]) -> float:
-        return 0.0
-
-    async def complete(self, context: List[bytes]) -> float:
-        return 0.0
