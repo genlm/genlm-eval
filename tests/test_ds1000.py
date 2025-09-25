@@ -7,7 +7,7 @@ from genlm.eval.domains.ds1000 import (
     DS1000Dataset,
     DS1000Instance,
     DS1000RuntimeNoErrorPotential,
-    postprocess_code,
+    _postprocess_code,
 )
 
 # ------------------------------ #
@@ -87,7 +87,7 @@ def test_postprocess_code_strips_fences_end_solution_and_html(evaluator):
         </code>
         """
     )
-    out = postprocess_code(src)
+    out = _postprocess_code(src)
     assert "x = 1" in out and "y = 2" in out
     assert "```" not in out
     assert "END SOLUTION" not in out

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 import os
 import random
@@ -12,22 +10,10 @@ from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from datasets import load_dataset
 
+from genlm.eval.domains.ds1000.utils import _sandbox_env, _postprocess_code
 from genlm.eval.core import EvaluationResult, Instance, Dataset, Evaluator
 
 log = logging.getLogger(__name__)
-
-################
-#    Helper    #
-################
-
-def postprocess_code(t: str) -> str:
-    # Process code as in https://github.com/xlang-ai/DS-1000/blob/main/test_ds1000.py
-    t = t.split('</code>')[0]
-    t = t.replace('```python', '')
-    t = t.split('```')[0]
-    t = t.split('\nEND SOLUTION')[0]
-    t = t.replace('<code>', '')
-    return t.strip()
 
 ################
 # DS-1000 Data #
@@ -107,7 +93,8 @@ class DS1000Dataset(Dataset[DS1000Instance]):
 
 class DS1000Evaluator(Evaluator[DS1000Instance]):
     def __init__(
-            self, python_executable: Optional[str] = None,
+            self,
+            python_executable: Optional[str] = None,
             timeout_seconds: float = 15.0,
             extra_env: Optional[Dict[str, str]] = None,
             max_log_chars: int = 4000
@@ -133,7 +120,7 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
         return False
     
     def evaluate_sample(self, instance: DS1000Instance, response: str) -> EvaluationResult:
-        solution = postprocess_code(response)
+        solution = _postprocess_code(response)
         if not solution:
             return EvaluationResult(score=0.0, desc="empty solution", metadata=instance.metadata)
 
@@ -188,9 +175,9 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(script + "\n")
 
-            # Create command and environment
-            cmd = [self.python_executable, path]
-            env = {**os.environ, **self.extra_env, "MPLBACKEND": "Agg"}
+            # Build a sandboxed env
+            env = _sandbox_env(td, extra_env=self.extra_env)
+            cmd = [self.python_executable, "-B", path]
 
             try:
                 proc = subprocess.run(
@@ -212,18 +199,14 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
             fail_line = bool(self.marker_fail in out) or bool(self.marker_fail in err)
             ok = (rc == 0) and pass_line and (not fail_line)
             return (ok, rc, out.strip(), err.strip())
-    
 
 ##########################
 # Prompt formatter (LM)  #
 ##########################
 
-DS1000_SYSTEM_PROMPT = ("") # Keep empty for now
-
 def default_prompt_formatter(
         tokenizer,
         instance: DS1000Instance,
-        system_prompt: str = DS1000_SYSTEM_PROMPT, # Currently unused
-        use_chat_format: bool = False # needed for to conform with evaluator interface
+        use_chat_format: bool = False # conform with evaluator interface
     ) -> List[int]:
-    return tokenizer.encode(system_prompt + instance.prompt)
+    return tokenizer.encode(instance.prompt)
