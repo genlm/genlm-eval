@@ -1,5 +1,4 @@
 from typing import List
-import codeop
 import tempfile
 import subprocess
 import sys
@@ -41,37 +40,12 @@ class DS1000RuntimeNoErrorPotential(Potential):
         code = self._bytes_to_str(context)
         if not code.endswith("\n"):
             return 0.0
-        if not self._compile_is_complete(code):
-            return 0.0
         code = _postprocess_code(code)
         out = await self._score_no_error(code)
         return out
     
     async def complete(self, context):
-        return await self.prefix(context)
-
-    def _compile_is_complete(self, src: str) -> bool:
-        # Returns True if src is a complete, compilable 'exec' suite
-        try:
-            return codeop.compile_command(src, symbol="exec") is not None
-        except (SyntaxError, ValueError, OverflowError):
-            return False
-
-    def _truncate_to_complete_statements(self, code: str) -> str:
-        # Longest prefix that compiles as a complete suite; else "".
-        if not code.strip():
-            return ""
-        # Fast path
-        if self._compile_is_complete(code):
-            return code
-        # Back off by lines until something compiles
-        lines = code.splitlines(keepends=True)
-        for end in range(len(lines) - 1, -1, -1):
-            cand = "".join(lines[:end])
-            if cand.strip() and self._compile_is_complete(cand):
-                return cand
-        return ""
-    
+        return await self.prefix(context)    
 
     async def _score_no_error(self, complete_code: str) -> float:
         if complete_code.strip() == "":
