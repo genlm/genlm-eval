@@ -2,14 +2,14 @@ from .planetarium import (
     GoalInferenceInstance,
     GoalInferenceDataset,
     GoalInferenceEvaluator,
-    DomainResolver,
     goal_default_prompt_formatter,    
-    GOAL_SYSTEM_PROMPT
+    GOAL_SYSTEM_PROMPT,
 )
 
 from .goal_potential import GoalInferenceVALPotential
 
-from .utils import DomainResolver
+from .utils import get_domain_text, materialize_domain
+
 
 __all__ = [
     "GoalInferenceInstance",
@@ -18,5 +18,6 @@ __all__ = [
     "GOAL_SYSTEM_PROMPT",
     "goal_default_prompt_formatter",
     "GoalInferenceVALPotential",
-    "DomainResolver"
+    "get_domain_text",
+    "materialize_domain",
 ]

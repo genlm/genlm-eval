@@ -130,7 +130,7 @@ class GoalInferenceDataset(Dataset[GoalInferenceInstance]):
 
 class GoalInferenceEvaluator(Evaluator[GoalInferenceInstance]):
     """Evaluator using Planetarium equivalence on masked PDDL reconstruction."""
-    
+
     def evaluate_sample(self, instance: GoalInferenceInstance, response: str) -> EvaluationResult:
         """Inject prediction into masked PDDL and check equivalence.
 
@@ -172,28 +172,6 @@ GOAL_SYSTEM_PROMPT = (
     "describes user-provided planning problems directly without further "
     "explanations or texts.\n\n"
 )
-
-class DomainResolver:
-    """Resolve domain names to domain PDDL text via a small in-memory cache."""
-
-    def __init__(self, domain_map: Dict[str, Union[str, Path, bytes]]):
-        """Build the resolver cache from a mapping.
-
-        Args:
-            domain_map: Mapping from domain name to either:
-                - path to a domain .pddl file (str or Path),
-                - raw PDDL text (str),
-                - or other object (e.g., bytes) which will be coerced via `str`.
-
-        """
-        cache: Dict[str, str] = {}
-        for name, src in domain_map.items():
-            key = str(name).lower()
-            if isinstance(src, (str, Path)) and Path(src).exists():
-                cache[key] = Path(src).read_text(encoding="utf-8")
-            else:
-                cache[key] = str(src)
-        self._cache = cache
 
 
 def goal_default_prompt_formatter(
