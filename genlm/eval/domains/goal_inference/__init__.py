@@ -1,4 +1,4 @@
-from .planetarium import (
+from .goal_inference import (
     GoalInferenceInstance,
     GoalInferenceDataset,
     GoalInferenceEvaluator,

@@ -3,7 +3,7 @@ import importlib.resources as ir
 import shutil
 
 _REGISTRY = {"blocksworld": "blocksworld.pddl"}
-_PKG = "genlm.eval.domains.goal_inference.pddl_domains"
+_PKG = "genlm.eval.assets.goal_inference.pddl_domains"
 
 def get_domain_text(name: str) -> str:
     fname = _REGISTRY[name.lower()]

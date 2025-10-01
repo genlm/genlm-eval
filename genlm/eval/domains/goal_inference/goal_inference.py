@@ -1,8 +1,7 @@
 import re
-from typing import List, Optional, Dict, Union
-from pathlib import Path
-
+from typing import List, Optional
 import planetarium
+
 from genlm.eval.core import Evaluator, EvaluationResult, Instance, Dataset
 from datasets import load_dataset
 
@@ -150,7 +149,7 @@ class GoalInferenceEvaluator(Evaluator[GoalInferenceInstance]):
             return EvaluationResult(score=0.0, desc="no_blank_marker")
 
         pred = response.strip() if response is not None else ""
-        generated_pddl = masked.replace("[BLANK]", pred + ")")
+        generated_pddl = masked.replace("[BLANK]", pred + ")") # Add missing bracket
         try:
             ok = planetarium.evaluate(full_pddl, generated_pddl)[2]
         except (ValueError, AttributeError):

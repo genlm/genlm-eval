@@ -1,0 +1,10 @@
+start: " " (pred " ")* final_pred
+pred: final_pred ")"
+final_pred: "(clear " obj
+    | "(on " obj " " obj
+    | "(arm-empty"
+    | "(holding " obj
+    | "(on-table " obj
+
+obj: "b" digit 
+digit: /[0-9]/
