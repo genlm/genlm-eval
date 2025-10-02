@@ -31,7 +31,7 @@ jobs:
         run: |
           uv venv --python 3.11
           source .venv/bin/activate
-          uv pip install -e .[test,spider,molecules,pattern_matching,json_schema_bench]
+          uv pip install -e .[test,spider,molecules,pattern_matching,json_schema_bench, goal_inference]
           python -m nltk.downloader punkt_tab
           pytest tests --cov=genlm/eval --cov-report=json
 
