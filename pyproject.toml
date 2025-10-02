@@ -45,7 +45,7 @@ json_schema_bench = [
 goal_inference = [
     "genlm-control>=0.2.1",
     "polars",
-    "git+https://github.com/BatsResearch/planetarium.git"
+    "planetarium @ git+https://github.com/BatsResearch/planetarium.git"
 ]
 
 test = [

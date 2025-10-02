@@ -2,7 +2,7 @@ from .goal_inference import (
     GoalInferenceInstance,
     GoalInferenceDataset,
     GoalInferenceEvaluator,
-    goal_default_prompt_formatter,    
+    goal_default_prompt_formatter,
     GOAL_SYSTEM_PROMPT,
 )
 

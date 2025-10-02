@@ -7,6 +7,7 @@ from pathlib import Path
 
 from genlm.control import Potential
 
+
 class GoalInferenceVALPotential(Potential):
     """Expensive potential that validates partial goal strings with VAL.
 
@@ -14,6 +15,7 @@ class GoalInferenceVALPotential(Potential):
     Fast-Downward plan for (domain, problem), and returns 0.0 if VAL
     validates the plan under the candidate goal (-inf otherwise).
     """
+
     def __init__(
         self,
         domain_pddl_text: str,
@@ -37,7 +39,9 @@ class GoalInferenceVALPotential(Potential):
         self.plans_dir.mkdir(parents=True, exist_ok=True)
 
         # Hash both domain + problem to key plan cache
-        key = hashlib.sha256((self.domain + "\n---\n" + self.problem).encode("utf-8")).hexdigest()
+        key = hashlib.sha256(
+            (self.domain + "\n---\n" + self.problem).encode("utf-8")
+        ).hexdigest()
         self.task_path = self.tasks_dir / f"{key}.pddl"
         self.plan_path = self.plans_dir / f"{key}.pddl"
         self.domain_path = self.tasks_dir / f"{key}.domain.pddl"
@@ -61,7 +65,13 @@ class GoalInferenceVALPotential(Potential):
             f"{shlex.quote(str(self.domain_path))} {shlex.quote(str(self.task_path))} "
             f'--search "astar(ipdb())"'
         )
-        proc = subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, encoding="utf-8")
+        proc = subprocess.run(
+            cmd,
+            shell=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            encoding="utf-8",
+        )
         if proc.returncode != 0:
             raise ValueError(f"[Fast-Downward] nonzero exit:\n{proc.stderr}")
 
@@ -92,7 +102,12 @@ class GoalInferenceVALPotential(Potential):
         Returns:
             str: Modified problem PDDL with the new goal.
         """
-        return re.sub(r"\(:goal \(and .*?\)\)\n", f"(:goal (and {ctx}))\n", problem_pddl, flags=re.DOTALL)
+        return re.sub(
+            r"\(:goal \(and .*?\)\)\n",
+            f"(:goal (and {ctx}))\n",
+            problem_pddl,
+            flags=re.DOTALL,
+        )
 
     def _energy(self, s: str) -> float:
         """Compute potential: 0.0 if VAL validates, else -inf.
@@ -111,7 +126,13 @@ class GoalInferenceVALPotential(Potential):
             tmp_problem = Path(tmp) / "task.pddl"
             tmp_problem.write_text(gen, encoding="utf-8")
             cmd = f"{shlex.quote(self.val_cmd)} {shlex.quote(str(self.domain_path))} {shlex.quote(str(tmp_problem))} {shlex.quote(str(self.plan_path))}"
-            proc = subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, encoding="utf-8")
+            proc = subprocess.run(
+                cmd,
+                shell=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                encoding="utf-8",
+            )
             return 0.0 if proc.returncode == 0 else float("-inf")
 
     async def prefix(self, context: bytes) -> float:
@@ -123,9 +144,9 @@ class GoalInferenceVALPotential(Potential):
         Returns:
             float: Potential value for the prefix (0.0 / -inf).
         """
-        try: 
+        try:
             return self._energy(context.decode("utf-8"))
-        except Exception: 
+        except Exception:
             return float("-inf")
 
     async def complete(self, context: bytes) -> float:
@@ -137,7 +158,7 @@ class GoalInferenceVALPotential(Potential):
         Returns:
             Potential value for the complete string (0.0 / -inf).
         """
-        try: 
+        try:
             return self._energy(context.decode("utf-8") + ")")
-        except Exception: 
+        except Exception:
             return float("-inf")

@@ -9,6 +9,7 @@ from datasets import load_dataset
 #               Dataset  #
 ##########################
 
+
 class GoalInferenceInstance(Instance):
     """Schema for a single Planetarium goal-inference item."""
 
@@ -19,7 +20,10 @@ class GoalInferenceInstance(Instance):
     domain_name: str
 
     def __str__(self):
-        return f"GoalInferenceInstance(id={self.instance_id}, domain={self.domain_name})"
+        return (
+            f"GoalInferenceInstance(id={self.instance_id}, domain={self.domain_name})"
+        )
+
 
 class GoalInferenceDataset(Dataset[GoalInferenceInstance]):
     """Dataset wrapper yielding GoalInferenceInstance items."""
@@ -42,7 +46,7 @@ class GoalInferenceDataset(Dataset[GoalInferenceInstance]):
         if not m:
             return None
         return problem_text[: m.end()]
-    
+
     @staticmethod
     def _mask_goal_for_reference(problem_text: str) -> Optional[str]:
         """Create a masked PDDL with '[BLANK]' in place of the goal.
@@ -75,9 +79,9 @@ class GoalInferenceDataset(Dataset[GoalInferenceInstance]):
                 masked_pddl=masked_pddl,
                 prefix_pddl=prefix_pddl,
                 instance_id=rec.get("instance_id", i),
-                domain_name=rec["domain_name"]
+                domain_name=rec["domain_name"],
             )
-        
+
     @classmethod
     def from_hf_planetarium(
         cls,
@@ -109,12 +113,14 @@ class GoalInferenceDataset(Dataset[GoalInferenceInstance]):
             if int(ex.get("num_objects", 0)) > int(max_objects):
                 continue
 
-            dev_items.append({
-                "instance_id": int(ex.get("id", len(dev_items))),
-                "nl_goal": str(ex["natural_language"]),
-                "problem_text": str(ex["problem_pddl"]),
-                "domain_name": dom
-            })
+            dev_items.append(
+                {
+                    "instance_id": int(ex.get("id", len(dev_items))),
+                    "nl_goal": str(ex["natural_language"]),
+                    "problem_text": str(ex["problem_pddl"]),
+                    "domain_name": dom,
+                }
+            )
 
         return cls(dev_items)
 
@@ -127,10 +133,13 @@ class GoalInferenceDataset(Dataset[GoalInferenceInstance]):
 #       Evaluator        #
 ##########################
 
+
 class GoalInferenceEvaluator(Evaluator[GoalInferenceInstance]):
     """Evaluator using Planetarium equivalence on masked PDDL reconstruction."""
 
-    def evaluate_sample(self, instance: GoalInferenceInstance, response: str) -> EvaluationResult:
+    def evaluate_sample(
+        self, instance: GoalInferenceInstance, response: str
+    ) -> EvaluationResult:
         """Inject prediction into masked PDDL and check equivalence.
 
         Args:
@@ -149,7 +158,7 @@ class GoalInferenceEvaluator(Evaluator[GoalInferenceInstance]):
             return EvaluationResult(score=0.0, desc="no_blank_marker")
 
         pred = response.strip() if response is not None else ""
-        generated_pddl = masked.replace("[BLANK]", pred + ")") # Add missing bracket
+        generated_pddl = masked.replace("[BLANK]", pred + ")")  # Add missing bracket
         try:
             ok = planetarium.evaluate(full_pddl, generated_pddl)[2]
         except (ValueError, AttributeError):
@@ -193,7 +202,12 @@ def goal_default_prompt_formatter(
     if use_chat_format:
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": "Natural Language goal description: \n\n" + instance.nl_goal + "\n\n"},
+            {
+                "role": "user",
+                "content": "Natural Language goal description: \n\n"
+                + instance.nl_goal
+                + "\n\n",
+            },
             {"role": "assistant", "content": instance.prefix_pddl},
         ]
         return tokenizer.apply_chat_template(
