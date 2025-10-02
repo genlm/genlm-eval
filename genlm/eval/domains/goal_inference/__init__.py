@@ -8,9 +8,6 @@ from .goal_inference import (
 
 from .goal_potential import GoalInferenceVALPotential
 
-from .utils import get_domain_text, materialize_domain
-
-
 __all__ = [
     "GoalInferenceInstance",
     "GoalInferenceDataset",
@@ -18,6 +15,4 @@ __all__ = [
     "GOAL_SYSTEM_PROMPT",
     "goal_default_prompt_formatter",
     "GoalInferenceVALPotential",
-    "get_domain_text",
-    "materialize_domain",
 ]
