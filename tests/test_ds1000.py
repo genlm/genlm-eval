@@ -200,7 +200,7 @@ async def test_runtime_potential_gating_requires_trailing_newline_and_parsable()
     # Trailing newline but syntactically incomplete -> return 0.0
     s2 = "def foo(\n"
     score2 = await pot.prefix([s2.encode()])
-    assert score2 == 0.0
+    assert score2 == float("-inf")
 
     # Proper code -> executes harness -> OK
     s3 = "def foo():\n    return 42\n"

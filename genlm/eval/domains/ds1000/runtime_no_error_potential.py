@@ -1,4 +1,4 @@
-from typing import List
+from typing import Dict, List, Optional
 import tempfile
 import subprocess
 import sys
@@ -13,11 +13,20 @@ class DS1000RuntimeNoErrorPotential(Potential):
     DS-1000 expensive potential: execute the harness on a complete prefix.
     Return 0.0 if no error, -inf otherwise.
     """
-    def __init__(self, vocabulary=None, code_context:str="", timeout_seconds:float=30.0):
+    def __init__(
+            self,
+            vocabulary=None,
+            code_context:str="",
+            timeout_seconds:float=30.0,
+            python_executable: Optional[str] = None,
+            extra_env: Optional[Dict[str, str]] = None
+        ):
         vocabulary = vocabulary or [bytes([i]) for i in range(256)]
         super().__init__(vocabulary=vocabulary)
         self.timeout_seconds = float(timeout_seconds)
         self.code_context = code_context
+        self.python_executable = python_executable or sys.executable
+        self.extra_env = dict(extra_env or {})
     
     def coerce(self, other, f=None, prune=True):
         # Overwrite coerce to adopt the LLM vocabulary without mapping tokens.
@@ -25,6 +34,8 @@ class DS1000RuntimeNoErrorPotential(Potential):
             vocabulary=list(other.vocab),
             code_context=self.code_context,
             timeout_seconds=self.timeout_seconds,
+            python_executable=self.python_executable,
+            extra_env=self.extra_env,
         )
     
     def _bytes_to_str(self, toks):
@@ -87,9 +98,12 @@ class DS1000RuntimeNoErrorPotential(Potential):
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(script + "\n")
 
-                env = _sandbox_env(td, extra_env={"MPLBACKEND": "Agg"})
+                env = _sandbox_env(
+                    td,
+                    extra_env={**{"MPLBACKEND": "Agg", "PYTHONWARNINGS": "ignore"},**self.extra_env}
+                )
                 proc = subprocess.run(
-                    [sys.executable, "-B", path],
+                    [self.python_executable, "-B", path],
                     check=False,
                     capture_output=True,
                     text=True,

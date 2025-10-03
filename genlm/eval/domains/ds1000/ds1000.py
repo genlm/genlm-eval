@@ -176,7 +176,7 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
                 f.write(script + "\n")
 
             # Build a sandboxed env
-            env = _sandbox_env(td, extra_env=self.extra_env)
+            env = _sandbox_env(td, extra_env={**{"MPLBACKEND": "Agg"}, **self.extra_env})
             cmd = [self.python_executable, "-B", path]
 
             try:
