@@ -38,7 +38,7 @@ nav:
       - Pattern Matching: cookbook/domains/pattern_matching.ipynb
       - Text to SQL (Spider): cookbook/domains/spider.ipynb
       - Molecular Synthesis: cookbook/domains/molecular_synthesis.ipynb
-      - Python for data science: cookbook/domains/ds1000.ipynb
+      - Python for data science (DS-1000): cookbook/domains/ds1000.ipynb
     - Custom Domains: cookbook/custom_domains.ipynb
 
 markdown_extensions:
