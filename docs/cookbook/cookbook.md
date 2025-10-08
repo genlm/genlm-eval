@@ -44,3 +44,11 @@ Evaluate models on generating SQL queries from natural language:
 - Data: Spider dataset with database schemas
 
 [View Example](domains/spider.ipynb)
+
+#### Goal Inference (Planetarium)
+Evaluate models on inferring goals from natural language descriptions:
+
+- Task: Given a natural-language description, generate the PDDL goal expression that for a provided problem.
+- Data: Small instances form the Blocksworld subset of the Planetarium dataset.
+
+[View Example](domains/goal_inference.ipynb)
