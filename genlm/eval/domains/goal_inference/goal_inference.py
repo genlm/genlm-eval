@@ -5,8 +5,6 @@ import polars as pl
 from huggingface_hub import hf_hub_download
 
 from genlm.eval.core import Evaluator, EvaluationResult, Instance, Dataset
-from datasets import load_dataset
-
 ##########################
 #               Dataset  #
 ##########################
@@ -142,10 +140,6 @@ class GoalInferenceDataset(Dataset[GoalInferenceInstance]):
 
         items = df.to_dicts()
         return cls(items)
-    
-    @property
-    def schema(self):
-        return GoalInferenceInstance
 
     @property
     def schema(self):

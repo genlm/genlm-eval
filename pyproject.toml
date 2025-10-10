@@ -46,7 +46,7 @@ goal_inference = [
     "genlm-control>=0.2.1",
     "datasets>=4.0.0",
     "polars",
-    "planetarium @ git+https://github.com/BatsResearch/planetarium.git"
+    "planetarium @ git+https://github.com/samuki/planetarium.git"
 ]
 
 test = [
