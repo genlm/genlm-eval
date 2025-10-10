@@ -1,6 +1,8 @@
 import re
 from typing import List, Optional
 import planetarium
+import polars as pl
+from huggingface_hub import hf_hub_download
 
 from genlm.eval.core import Evaluator, EvaluationResult, Instance, Dataset
 from datasets import load_dataset
@@ -85,44 +87,65 @@ class GoalInferenceDataset(Dataset[GoalInferenceInstance]):
     @classmethod
     def from_hf_planetarium(
         cls,
-        split: str = "train",
-        subset: str = "default",
-        max_objects: int = 10,
+        n_examples: int = 100,
+        max_objects: int = 9,
+        shard_filename: str = "data/train-00000-of-00001.parquet",
         domains: Optional[List[str]] = None,
     ) -> "GoalInferenceDataset":
         """Load and filter Planetarium data via HuggingFace Datasets.
 
         Args:
-            split: Dataset split to load (e.g., "train", "validation", "test").
-            subset: Named configuration (Planetarium subset).
+            n_examples: Number of instances to evaluate.
             max_objects: Keep problems with at most this many objects.
+            shard_filename: Specific shard file to download from Planetarium.
             domains: Optional list of domain names to include (case-insensitive).
 
         Returns:
             GoalInferenceDataset with filtered instances.
         """
-        ds = load_dataset("BatsResearch/planetarium", name=subset, split=split)
+        local_path = hf_hub_download(
+            repo_id="BatsResearch/planetarium",
+            repo_type="dataset",
+            filename=shard_filename,
+        )
 
-        allowed = None if domains is None else {d.lower() for d in domains}
-        dev_items: List[dict] = []
+        allowed = {"blocksworld"} if domains is None else {d.lower() for d in domains}
 
-        for ex in ds:
-            dom = str(ex["domain"]).lower()
-            if allowed is not None and dom not in allowed:
-                continue
-            if int(ex.get("num_objects", 0)) > int(max_objects):
-                continue
-
-            dev_items.append(
-                {
-                    "instance_id": int(ex.get("id", len(dev_items))),
-                    "nl_goal": str(ex["natural_language"]),
-                    "problem_text": str(ex["problem_pddl"]),
-                    "domain_name": dom,
-                }
+        df = pl.read_parquet(local_path)
+        df = (
+            df.with_columns(
+                problem_pddl=pl.col("problem_pddl").str.replace("\r\n", "\n", literal=True),
+                natural_language=pl.col("natural_language").fill_null(""),
             )
+            .filter(pl.col("problem_pddl").str.contains("(:goal (and", literal=True))
+            .with_columns(
+                goal_natural_language=pl.concat_str(
+                    pl.lit("Your goal"),
+                    pl.col("natural_language").str.split(by="Your goal").list.last(),
+                ),
+            )
+            .filter(
+                (pl.col("domain").str.to_lowercase().is_in(list(allowed)))
+                & (pl.col("num_objects") <= max_objects)
+                & (pl.col("init_is_abstract") == 0)
+                & (pl.col("goal_is_abstract") == 0)
+            )
+            .unique(subset=["goal_natural_language"])
+            .head(n_examples)
+            .select(
+                pl.col("id").alias("instance_id"),
+                pl.col("goal_natural_language").alias("nl_goal"),
+                pl.col("problem_pddl").alias("problem_text"),
+                pl.col("domain").str.to_lowercase().alias("domain_name"),
+            )
+        )
 
-        return cls(dev_items)
+        items = df.to_dicts()
+        return cls(items)
+    
+    @property
+    def schema(self):
+        return GoalInferenceInstance
 
     @property
     def schema(self):
