@@ -6,28 +6,34 @@ import textwrap
 import os
 
 from genlm.control import Potential
-from genlm.eval.domains.ds1000.utils import _sandbox_env, _postprocess_code
+from genlm.eval.domains.ds1000.utils import (
+    _sandbox_env,
+    _postprocess_code,
+    get_runnable_code_context,
+)
+
 
 class DS1000RuntimeNoErrorPotential(Potential):
     """
     DS-1000 expensive potential: execute the harness on a complete prefix.
     Return 0.0 if no error, -inf otherwise.
     """
+
     def __init__(
-            self,
-            vocabulary=None,
-            code_context:str="",
-            timeout_seconds:float=30.0,
-            python_executable: Optional[str] = None,
-            extra_env: Optional[Dict[str, str]] = None
-        ):
+        self,
+        vocabulary=None,
+        code_context: str = "",
+        timeout_seconds: float = 30.0,
+        python_executable: Optional[str] = None,
+        extra_env: Optional[Dict[str, str]] = None,
+    ):
         vocabulary = vocabulary or [bytes([i]) for i in range(256)]
         super().__init__(vocabulary=vocabulary)
         self.timeout_seconds = float(timeout_seconds)
-        self.code_context = code_context
+        self.code_context = get_runnable_code_context(code_context)
         self.python_executable = python_executable or sys.executable
         self.extra_env = dict(extra_env or {})
-    
+
     def coerce(self, other, f=None, prune=True):
         # Overwrite coerce to adopt the LLM vocabulary without mapping tokens.
         return DS1000RuntimeNoErrorPotential(
@@ -37,7 +43,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
             python_executable=self.python_executable,
             extra_env=self.extra_env,
         )
-    
+
     def _bytes_to_str(self, toks):
         if not toks:
             return ""
@@ -49,18 +55,14 @@ class DS1000RuntimeNoErrorPotential(Potential):
 
     async def prefix(self, context: List[bytes]) -> float:
         code = self._bytes_to_str(context)
-        if not code.endswith("\n"):
-            return 0.0
         code = _postprocess_code(code)
         out = await self._score_no_error(code)
         return out
-    
+
     async def complete(self, context):
-        return await self.prefix(context)    
+        return await self.prefix(context)
 
     async def _score_no_error(self, complete_code: str) -> float:
-        if complete_code.strip() == "":
-            return 0.0
         OK, BAD = "<<<OK>>>", "<<<BAD>>>"
         script = textwrap.dedent(f"""
         import sys, traceback, warnings, os
@@ -71,20 +73,15 @@ class DS1000RuntimeNoErrorPotential(Potential):
         code_context = {self.code_context!r}
         solution = {complete_code!r}
         OK, BAD = "<<<OK>>>", "<<<BAD>>>"
-
         try:
             g = {{}}
             exec(code_context, g, g)  # defines test_execution(solution)
             te = g.get("test_execution")
             if not callable(te):
                 print(BAD); raise SystemExit(0)
-
             try:
                 te(solution)
                 # If we get here with no exception, it ran without runtime error.
-                print(OK)
-            except AssertionError:
-                # Treat harness correctness checks & missing `result` as non-fatal
                 print(OK)
             except BaseException:
                 print(BAD)
@@ -97,10 +94,12 @@ class DS1000RuntimeNoErrorPotential(Potential):
                 path = os.path.join(td, "rt_harness.py")
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(script + "\n")
-
                 env = _sandbox_env(
                     td,
-                    extra_env={**{"MPLBACKEND": "Agg", "PYTHONWARNINGS": "ignore"},**self.extra_env}
+                    extra_env={
+                        **{"MPLBACKEND": "Agg", "PYTHONWARNINGS": "ignore"},
+                        **self.extra_env,
+                    },
                 )
                 proc = subprocess.run(
                     [self.python_executable, "-B", path],
