@@ -1,10 +1,12 @@
 import re
 from typing import List, Optional
+
 import planetarium
 import polars as pl
 from huggingface_hub import hf_hub_download
 
 from genlm.eval.core import Evaluator, EvaluationResult, Instance, Dataset
+
 ##########################
 #               Dataset  #
 ##########################
@@ -90,13 +92,13 @@ class GoalInferenceDataset(Dataset[GoalInferenceInstance]):
         shard_filename: str = "data/train-00000-of-00001.parquet",
         domains: Optional[List[str]] = None,
     ) -> "GoalInferenceDataset":
-        """Load and filter Planetarium data via HuggingFace Datasets.
+        """Load and filter Planetarium data via HuggingFace.
 
         Args:
             n_examples: Number of instances to evaluate.
             max_objects: Keep problems with at most this many objects.
             shard_filename: Specific shard file to download from Planetarium.
-            domains: Optional list of domain names to include (case-insensitive).
+            domains: Optional list of domain names to include.
 
         Returns:
             GoalInferenceDataset with filtered instances.
@@ -112,7 +114,9 @@ class GoalInferenceDataset(Dataset[GoalInferenceInstance]):
         df = pl.read_parquet(local_path)
         df = (
             df.with_columns(
-                problem_pddl=pl.col("problem_pddl").str.replace("\r\n", "\n", literal=True),
+                problem_pddl=pl.col("problem_pddl").str.replace(
+                    "\r\n", "\n", literal=True
+                ),
                 natural_language=pl.col("natural_language").fill_null(""),
             )
             .filter(pl.col("problem_pddl").str.contains("(:goal (and", literal=True))
@@ -128,7 +132,8 @@ class GoalInferenceDataset(Dataset[GoalInferenceInstance]):
                 & (pl.col("init_is_abstract") == 0)
                 & (pl.col("goal_is_abstract") == 0)
             )
-            .unique(subset=["goal_natural_language"])
+            .unique(subset=["goal_natural_language"], keep="first", maintain_order=True)
+            .sample(fraction=1, shuffle=True, seed=1234)
             .head(n_examples)
             .select(
                 pl.col("id").alias("instance_id"),
@@ -175,7 +180,8 @@ class GoalInferenceEvaluator(Evaluator[GoalInferenceInstance]):
             return EvaluationResult(score=0.0, desc="no_blank_marker")
 
         pred = response.strip() if response is not None else ""
-        generated_pddl = masked.replace("[BLANK]", pred + ")")  # Add missing bracket
+        generated_pddl = masked.replace("[BLANK]", pred + ")")
+
         try:
             ok = planetarium.evaluate(full_pddl, generated_pddl)[2]
         except (ValueError, AttributeError):

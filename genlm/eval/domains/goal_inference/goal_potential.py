@@ -85,8 +85,7 @@ class GoalInferenceVALPotential(Potential):
         Returns:
             A version with the last balanced ')' ensured, or None if none found.
         """
-        s = s.replace(")))\n", ")").replace(")))", ")").replace("))", ")")
-        head, sep, tail = s.rpartition(")")
+        head, _, _ = s.rpartition(")")
         if not head:
             return None
         return head + ")"
@@ -103,10 +102,7 @@ class GoalInferenceVALPotential(Potential):
             str: Modified problem PDDL with the new goal.
         """
         return re.sub(
-            r"\(:goal \(and .*?\)\)\n",
-            f"(:goal (and {ctx}))\n",
-            problem_pddl,
-            flags=re.DOTALL,
+            r"\(:goal \(and .*?\)\)\n", f"(:goal (and {ctx}))\n", problem_pddl
         )
 
     def _energy(self, s: str) -> float:
