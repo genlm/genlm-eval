@@ -33,6 +33,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
         self.code_context = get_runnable_code_context(code_context)
         self.python_executable = python_executable or sys.executable
         self.extra_env = dict(extra_env or {})
+        self.last_was_syntax_error = False
 
     def coerce(self, other, f=None, prune=True):
         # Overwrite coerce to adopt the LLM vocabulary without mapping tokens.
@@ -55,16 +56,32 @@ class DS1000RuntimeNoErrorPotential(Potential):
 
     async def prefix(self, context: List[bytes]) -> float:
         code = self._bytes_to_str(context)
+        # Newline guardrail when using the default sampler.
+        if not code.endswith("\n"):
+            return 0.0
         code = _postprocess_code(code)
         out = await self._score_no_error(code)
         return out
 
-    async def complete(self, context):
-        return await self.prefix(context)
+    async def complete(self, context: List[bytes]):
+        code = self._bytes_to_str(context)
+        code = _postprocess_code(code)
+        out = await self._score_no_error(code)
+        return out
 
     async def _score_no_error(self, complete_code: str) -> float:
+        """
+        Run the harness script in a subprocess and checks for the presence of runtime errors.
+        Returns 0.0 if no error, -inf otherwise.
+
+        complete_code: str - the complete code to run
+        Returns:
+            float - 0.0 if no error, -inf otherwise.
+        """
         OK, BAD = "<<<OK>>>", "<<<BAD>>>"
-        script = textwrap.dedent(f"""
+        SYNTAX = "<<<SYNTAX>>>"
+        script = textwrap.dedent(
+            f"""
         import sys, traceback, warnings, os
         warnings.filterwarnings("ignore")
         os.environ.setdefault("PYTHONWARNINGS", "ignore")
@@ -73,6 +90,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
         code_context = {self.code_context!r}
         solution = {complete_code!r}
         OK, BAD = "<<<OK>>>", "<<<BAD>>>"
+        SYNTAX = "<<<SYNTAX>>>"
         try:
             g = {{}}
             exec(code_context, g, g)  # defines test_execution(solution)
@@ -83,11 +101,18 @@ class DS1000RuntimeNoErrorPotential(Potential):
                 te(solution)
                 # If we get here with no exception, it ran without runtime error.
                 print(OK)
-            except BaseException:
+            except AssertionError:
+                print(OK)
+            except SyntaxError:
+                print(SYNTAX)
+            except Exception:
                 print(BAD)
-        except BaseException:
+        except SyntaxError:
+            print(SYNTAX)
+        except Exception:
             print(BAD)
-        """).strip()
+        """
+        ).strip()
 
         try:
             with tempfile.TemporaryDirectory(prefix="ds1000_rt_") as td:
@@ -116,4 +141,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
         out = (proc.stdout or "") + (proc.stderr or "")
         ok = any(line.strip() == OK for line in out.splitlines())
         bad = any(line.strip().startswith(BAD) for line in out.splitlines())
+        syntax = any(line.strip().startswith(SYNTAX) for line in out.splitlines())
+        bad = bad or syntax
+        self.last_was_syntax_error = bool(syntax)
         return 0.0 if ok and not bad else float("-inf")
