@@ -1,17 +1,6 @@
 import os
 
 
-def get_runnable_code_context(code_context):
-    code_context_lines = code_context.split("\n")
-    new_code_context_lines = []
-    for line in code_context_lines:
-        if "assert exec_test" in line:
-            continue
-        else:
-            new_code_context_lines.append(line)
-    return "\n".join(new_code_context_lines)
-
-
 def _sandbox_env(td: str, extra_env: dict | None = None) -> dict:
     """
     Return sandbox env that keeps caches/configs inside td and avoids .pyc

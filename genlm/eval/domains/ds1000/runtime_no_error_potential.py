@@ -9,7 +9,6 @@ from genlm.control import Potential
 from genlm.eval.domains.ds1000.utils import (
     _sandbox_env,
     _postprocess_code,
-    get_runnable_code_context,
 )
 
 
@@ -30,7 +29,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
         vocabulary = vocabulary or [bytes([i]) for i in range(256)]
         super().__init__(vocabulary=vocabulary)
         self.timeout_seconds = float(timeout_seconds)
-        self.code_context = get_runnable_code_context(code_context)
+        self.code_context = code_context
         self.python_executable = python_executable or sys.executable
         self.extra_env = dict(extra_env or {})
         self.last_was_syntax_error = False
@@ -71,47 +70,52 @@ class DS1000RuntimeNoErrorPotential(Potential):
 
     async def _score_no_error(self, complete_code: str) -> float:
         """
-        Run the harness script in a subprocess and checks for the presence of runtime errors.
-        Returns 0.0 if no error, -inf otherwise.
+        Run the harness script in a subprocess and check for runtime errors.
+        Returns 0.0 if no error (incl. AssertionError), -inf otherwise.
 
         complete_code: str - the complete code to run
         Returns:
             float - 0.0 if no error, -inf otherwise.
         """
-        OK, BAD = "<<<OK>>>", "<<<BAD>>>"
-        SYNTAX = "<<<SYNTAX>>>"
+        OK, BAD, SYNTAX = "<<<OK>>>", "<<<BAD>>>", "<<<SYNTAX>>>"
+
         script = textwrap.dedent(
             f"""
-        import sys, traceback, warnings, os
-        warnings.filterwarnings("ignore")
-        os.environ.setdefault("PYTHONWARNINGS", "ignore")
-        os.environ.setdefault("MPLBACKEND", "Agg")
+            import sys, warnings, os, ast
+            warnings.filterwarnings("ignore")
+            os.environ.setdefault("PYTHONWARNINGS", "ignore")
+            os.environ.setdefault("MPLBACKEND", "Agg")
 
-        code_context = {self.code_context!r}
-        solution = {complete_code!r}
-        OK, BAD = "<<<OK>>>", "<<<BAD>>>"
-        SYNTAX = "<<<SYNTAX>>>"
-        try:
-            g = {{}}
-            exec(code_context, g, g)  # defines test_execution(solution)
-            te = g.get("test_execution")
-            if not callable(te):
-                print(BAD); raise SystemExit(0)
+            OK, BAD, SYNTAX = "<<<OK>>>", "<<<BAD>>>", "<<<SYNTAX>>>"
+            code_context = {self.code_context!r}
+            answer = {complete_code!r}
             try:
-                te(solution)
-                # If we get here with no exception, it ran without runtime error.
-                print(OK)
-            except AssertionError:
+                g = {{}}
+                exec(code_context, g, g)
+                te = g.get("test_execution")
+                if not callable(te):
+                    print(BAD); raise SystemExit(0)
+                try: # ast.parse to check if the answer is valid code
+                    ast.parse(answer, filename="<answer>", mode="exec")
+                except SyntaxError:
+                    print(SYNTAX); raise SystemExit(0)
+                try:
+                    te(answer)
+                    # If we get here with no exception, it ran without runtime error.
+                    print(OK)
+                except AssertionError:
+                    print(OK)
+                except SyntaxError:
+                    print(SYNTAX)
+                except Exception:
+                    print(BAD)
+            except AssertionError: # Safety check for AssertionError
                 print(OK)
             except SyntaxError:
                 print(SYNTAX)
             except Exception:
                 print(BAD)
-        except SyntaxError:
-            print(SYNTAX)
-        except Exception:
-            print(BAD)
-        """
+            """
         ).strip()
 
         try:
@@ -119,6 +123,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
                 path = os.path.join(td, "rt_harness.py")
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(script + "\n")
+
                 env = _sandbox_env(
                     td,
                     extra_env={
@@ -126,6 +131,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
                         **self.extra_env,
                     },
                 )
+
                 proc = subprocess.run(
                     [self.python_executable, "-B", path],
                     check=False,
@@ -140,8 +146,9 @@ class DS1000RuntimeNoErrorPotential(Potential):
 
         out = (proc.stdout or "") + (proc.stderr or "")
         ok = any(line.strip() == OK for line in out.splitlines())
-        bad = any(line.strip().startswith(BAD) for line in out.splitlines())
-        syntax = any(line.strip().startswith(SYNTAX) for line in out.splitlines())
-        bad = bad or syntax
+        bad = any(line.strip() == BAD for line in out.splitlines())
+        syntax = any(line.strip() == SYNTAX for line in out.splitlines())
+
         self.last_was_syntax_error = bool(syntax)
+        bad = bad or syntax
         return 0.0 if ok and not bad else float("-inf")
