@@ -54,7 +54,7 @@ ds1000_code_env = [
   "statsmodels==0.14.1",
   "xgboost==2.0.3",
   "PyYAML",
-  "tensorflow-cpu==2.16.1",
+  "tensorflow==2.16.1",
 ]
 
 json_schema_bench = [
