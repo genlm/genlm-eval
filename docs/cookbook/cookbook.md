@@ -45,6 +45,13 @@ Evaluate models on generating SQL queries from natural language:
 
 [View Example](domains/spider.ipynb)
 
+#### Python for Data Science (DS-1000)
+Evaluate models on valid and executable Python code:
+
+- Task: Generate valid and executable Python code
+- Data: DS-1000 dataset
+
+[View Example](domains/ds1000.ipynb)
 #### Goal Inference (Planetarium)
 Evaluate models on inferring goals from natural language descriptions:
 
