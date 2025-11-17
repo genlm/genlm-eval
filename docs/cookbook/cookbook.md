@@ -52,3 +52,10 @@ Evaluate models on valid and executable Python code:
 - Data: DS-1000 dataset
 
 [View Example](domains/ds1000.ipynb)
+#### Goal Inference (Planetarium)
+Evaluate models on inferring goals from natural language descriptions:
+
+- Task: Given a natural-language description, generate the PDDL goal expression that for a provided problem.
+- Data: Small instances form the Blocksworld subset of the Planetarium dataset.
+
+[View Example](domains/goal_inference.ipynb)
