@@ -19,6 +19,15 @@ Learn how to extend `genlm-eval` to evaluate models on your own custom domains. 
 
 [View Example](custom_domains.ipynb)
 
+### Custom Potentials
+Learn how to implement custom potentials to encode constraints and evaluate models with constrained generation. This example walks through:
+
+- Implementing custom potentials to encode constraints
+- Creating a model adaptor that uses constrained generation
+- Running the evaluation
+
+[View Example](custom_potentials.ipynb)
+
 ### Domain-Specific Examples
 
 #### Pattern Matching
