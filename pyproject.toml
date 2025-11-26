@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "genlm-eval"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Evaluation framework for models in the GenLM ecosystem"
 authors = []
 readme = "README.md"
