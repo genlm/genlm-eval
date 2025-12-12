@@ -25,6 +25,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
         timeout_seconds: float = 30.0,
         python_executable: Optional[str] = None,
         extra_env: Optional[Dict[str, str]] = None,
+        transform_fn=None,
     ):
         vocabulary = vocabulary or [bytes([i]) for i in range(256)]
         super().__init__(vocabulary=vocabulary)
@@ -33,15 +34,19 @@ class DS1000RuntimeNoErrorPotential(Potential):
         self.python_executable = python_executable or sys.executable
         self.extra_env = dict(extra_env or {})
         self.last_was_syntax_error = False
+        self.transform_fn = transform_fn or (lambda x: x)
 
     def coerce(self, other, f=None, prune=True):
-        # Overwrite coerce to adopt the LLM vocabulary without mapping tokens.
+        if f is None:
+            f = lambda x: x
+
         return DS1000RuntimeNoErrorPotential(
             vocabulary=list(other.vocab),
             code_context=self.code_context,
             timeout_seconds=self.timeout_seconds,
             python_executable=self.python_executable,
             extra_env=self.extra_env,
+            transform_fn=f,
         )
 
     def _bytes_to_str(self, toks):
@@ -54,6 +59,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
         return bytes_str
 
     async def prefix(self, context: List[bytes]) -> float:
+        context = self.transform_fn(context)
         code = self._bytes_to_str(context)
         # Newline guardrail when using the default sampler.
         if not code.endswith("\n"):
@@ -63,6 +69,8 @@ class DS1000RuntimeNoErrorPotential(Potential):
         return out
 
     async def complete(self, context: List[bytes]):
+        # Apply transformation before processing
+        context = self.transform_fn(context)
         code = self._bytes_to_str(context)
         code = _postprocess_code(code)
         out = await self._score_no_error(code)

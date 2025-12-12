@@ -132,9 +132,10 @@ class GoalInferenceDataset(Dataset[GoalInferenceInstance]):
                 & (pl.col("init_is_abstract") == 0)
                 & (pl.col("goal_is_abstract") == 0)
             )
-            .unique(subset=["goal_natural_language"], keep="first", maintain_order=True)
+            .unique(subset=["goal_natural_language"])
             .sample(fraction=1, shuffle=True, seed=1234)
             .head(n_examples)
+            .sort("id")
             .select(
                 pl.col("id").alias("instance_id"),
                 pl.col("goal_natural_language").alias("nl_goal"),
