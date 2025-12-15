@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 import tempfile
 import subprocess
 import sys
@@ -6,10 +6,7 @@ import textwrap
 import os
 
 from genlm.control import Potential
-from genlm.eval.domains.ds1000.utils import (
-    _sandbox_env,
-    _postprocess_code,
-)
+from genlm.eval.domains.ds1000.utils import _postprocess_code, _sandbox_env
 
 
 class DS1000RuntimeNoErrorPotential(Potential):
@@ -25,7 +22,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
         timeout_seconds: float = 30.0,
         python_executable: Optional[str] = None,
         extra_env: Optional[Dict[str, str]] = None,
-        transform_fn=None,
+        f: Optional[Callable[[List[bytes]], List[bytes]]] = None,
     ):
         vocabulary = vocabulary or [bytes([i]) for i in range(256)]
         super().__init__(vocabulary=vocabulary)
@@ -34,19 +31,21 @@ class DS1000RuntimeNoErrorPotential(Potential):
         self.python_executable = python_executable or sys.executable
         self.extra_env = dict(extra_env or {})
         self.last_was_syntax_error = False
-        self.transform_fn = transform_fn or (lambda x: x)
+        self.f = f
 
-    def coerce(self, other, f=None, prune=True):
-        if f is None:
-            f = lambda x: x
-
+    def coerce(
+        self,
+        other,
+        f: Optional[Callable[[List[bytes]], List[bytes]]] = None,
+        prune: bool = True,
+    ):
         return DS1000RuntimeNoErrorPotential(
             vocabulary=list(other.vocab),
             code_context=self.code_context,
             timeout_seconds=self.timeout_seconds,
             python_executable=self.python_executable,
             extra_env=self.extra_env,
-            transform_fn=f,
+            f=f,
         )
 
     def _bytes_to_str(self, toks):
@@ -59,7 +58,8 @@ class DS1000RuntimeNoErrorPotential(Potential):
         return bytes_str
 
     async def prefix(self, context: List[bytes]) -> float:
-        context = self.transform_fn(context)
+        if self.f is not None:
+            context = self.f(context)
         code = self._bytes_to_str(context)
         # Newline guardrail when using the default sampler.
         if not code.endswith("\n"):
@@ -70,7 +70,8 @@ class DS1000RuntimeNoErrorPotential(Potential):
 
     async def complete(self, context: List[bytes]):
         # Apply transformation before processing
-        context = self.transform_fn(context)
+        if self.f is not None:
+            context = self.f(context)
         code = self._bytes_to_str(context)
         code = _postprocess_code(code)
         out = await self._score_no_error(code)
