@@ -1,11 +1,11 @@
 import pytest
-from types import SimpleNamespace
 
 from genlm.eval.domains.collie import (
     CollieDataset,
     CollieEvaluator,
     CollieInstance,
     default_prompt_formatter,
+    CollieConstraintPotential,
 )
 from collie import constraints as cc
 from genlm.eval import ModelOutput, ModelResponse
@@ -117,6 +117,44 @@ def test_dataset_from_official():
     assert hasattr(first, "prompt")
     assert hasattr(first, "metadata")
     assert hasattr(first.constraint, "check")
+
+
+def test_dataset_filtering():
+    """Test dataset filtering options."""
+    from genlm.eval.domains.collie import RECOMMENDED_CONSTRAINT_TYPES
+
+    # Test constraint type filtering
+    ds = CollieDataset.from_official(
+        constraint_types=["wiki_c01", "guten_c01"], max_instances=10
+    )
+    assert len(ds) <= 10
+    for instance in ds:
+        assert instance.constraint_type in ["wiki_c01", "guten_c01"]
+
+    # Test example length filtering
+    ds = CollieDataset.from_official(max_example_length=200, max_instances=10)
+    assert len(ds) <= 10
+    for instance in ds:
+        assert len(instance.example) <= 200
+
+    # Test prompt length filtering
+    ds = CollieDataset.from_official(max_prompt_length=150, max_instances=10)
+    assert len(ds) <= 10
+    for instance in ds:
+        assert len(instance.prompt) <= 150
+
+    # Test combined filtering
+    ds = CollieDataset.from_official(
+        constraint_types=RECOMMENDED_CONSTRAINT_TYPES,
+        max_example_length=300,
+        max_prompt_length=200,
+        max_instances=5,
+    )
+    assert len(ds) <= 5
+    for instance in ds:
+        assert instance.constraint_type in RECOMMENDED_CONSTRAINT_TYPES
+        assert len(instance.example) <= 300
+        assert len(instance.prompt) <= 200
 
 
 def test_dataset_missing_fields():
@@ -359,3 +397,145 @@ def test_evaluate_sample_with_metadata(evaluator):
     assert result.score == 1.0
     assert "constraint_type" in result.metadata
     assert result.metadata["constraint_type"] == "test_c01"
+
+
+# ------------------------------ #
+# CollieConstraintPotential      #
+# ------------------------------ #
+
+
+class TestCollieConstraintPotential:
+    """Tests for CollieConstraintPotential."""
+
+    @pytest.mark.asyncio
+    async def test_word_count_constraint_partial(self):
+        """Test word count constraint on partial text."""
+        # Create a constraint: word count == 10
+        constraint = cc.Constraint(
+            cc.InputLevel(None),
+            cc.TargetLevel("word"),
+            cc.Count(),
+            cc.Relation("=="),
+            cc.Reduction(None),
+        )
+
+        potential = CollieConstraintPotential(constraint, targets=10, tolerance=1.5)
+
+        # Test partial text with 5 words (should be OK - below target)
+        partial_text = "This is a partial sentence".encode("utf-8")
+        score = await potential.prefix(partial_text)
+        assert score == 0.0, "Partial text below target should be accepted"
+
+        # Test partial text with 10 words (should be OK - at target)
+        at_target_text = "One two three four five six seven eight nine ten".encode(
+            "utf-8"
+        )
+        score = await potential.prefix(at_target_text)
+        assert score == 0.0, "Partial text at target should be accepted"
+
+        # Test partial text with 20 words (should fail - way above target * tolerance)
+        over_text = ("One two three four five six seven eight nine ten " * 2).encode(
+            "utf-8"
+        )
+        score = await potential.prefix(over_text)
+        assert score == float("-inf"), "Partial text way over target should be rejected"
+
+    @pytest.mark.asyncio
+    async def test_word_count_constraint_complete(self):
+        """Test word count constraint on complete text."""
+        constraint = cc.Constraint(
+            cc.InputLevel(None),
+            cc.TargetLevel("word"),
+            cc.Count(),
+            cc.Relation("=="),
+            cc.Reduction(None),
+        )
+
+        potential = CollieConstraintPotential(constraint, targets=10)
+
+        # Test complete text with exactly 10 words (should pass)
+        correct_text = "One two three four five six seven eight nine ten".encode(
+            "utf-8"
+        )
+        score = await potential.complete(correct_text)
+        assert score == 0.0, "Complete text with correct word count should pass"
+
+        # Test complete text with wrong count (should fail)
+        wrong_text = "One two three four five".encode("utf-8")
+        score = await potential.complete(wrong_text)
+        assert score == float("-inf"), "Complete text with wrong word count should fail"
+
+    @pytest.mark.asyncio
+    async def test_character_count_constraint(self):
+        """Test character count constraint."""
+        constraint = cc.Constraint(
+            cc.InputLevel(None),
+            cc.TargetLevel("character"),
+            cc.Count(),
+            cc.Relation("=="),
+            cc.Reduction(None),
+        )
+
+        potential = CollieConstraintPotential(constraint, targets=20, tolerance=1.5)
+
+        # Test partial text with 10 characters (should be OK)
+        partial_text = "1234567890".encode("utf-8")
+        score = await potential.prefix(partial_text)
+        assert score == 0.0, "Partial text below character target should be accepted"
+
+        # Test complete text with exactly 20 characters (should pass)
+        correct_text = "12345678901234567890".encode("utf-8")
+        score = await potential.complete(correct_text)
+        assert score == 0.0, "Complete text with correct character count should pass"
+
+    @pytest.mark.asyncio
+    async def test_empty_text(self):
+        """Test that empty text is handled correctly."""
+        constraint = cc.Constraint(
+            cc.InputLevel(None),
+            cc.TargetLevel("word"),
+            cc.Count(),
+            cc.Relation("=="),
+            cc.Reduction(None),
+        )
+
+        potential = CollieConstraintPotential(constraint, targets=10)
+
+        # Empty text should be OK during partial generation
+        empty_text = b""
+        score = await potential.prefix(empty_text)
+        assert score == 0.0, "Empty partial text should be accepted"
+
+    @pytest.mark.asyncio
+    async def test_foreach_constraint(self):
+        """Test ForEach constraint (e.g., each word has exactly 2 characters)."""
+        constraint = cc.Constraint(
+            cc.InputLevel("word"),
+            cc.TargetLevel("character"),
+            cc.ForEach(cc.Count()),
+            cc.Relation("=="),
+            cc.Reduction("all"),
+        )
+
+        # Target: each word should have exactly 2 characters
+        targets = [2, 2, 2, 2, 2]
+        potential = CollieConstraintPotential(
+            constraint, targets=targets, tolerance=1.5
+        )
+
+        # Test partial text with 2-char words (should be OK)
+        partial_text = "aa bb cc".encode("utf-8")
+        score = await potential.prefix(partial_text)
+        assert score == 0.0, "Partial text with correct word lengths should be accepted"
+
+        # Test complete text with all 2-char words (should pass)
+        correct_text = "aa bb cc dd ee".encode("utf-8")
+        score = await potential.complete(correct_text)
+        assert score == 0.0, "Complete text with correct word lengths should pass"
+
+        # Test complete text with wrong word length (should fail)
+        wrong_text = "aa bb ccc dd ee".encode("utf-8")  # 'ccc' has 3 chars
+        score = await potential.complete(wrong_text)
+        assert score == float(
+            "-inf"
+        ), "Complete text with wrong word length should fail"

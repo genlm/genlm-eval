@@ -76,3 +76,11 @@ Evaluate models on solving grade school math word problems:
 - Data: GSM8K dataset with 8,500 grade school math problems
 
 [View Example](domains/gsm8k.ipynb)
+
+#### Constrained Text Generation (Collie)
+Evaluate models on generating text that satisfies various constraints:
+
+- Task: Generate text that satisfies constraints (word count, character count, required words/phrases, paragraph structure)
+- Data: Collie dataset (Yao et al., 2023) - a collection of constrained text generation tasks
+
+[View Example](domains/collie.ipynb)

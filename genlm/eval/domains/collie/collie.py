@@ -3,10 +3,47 @@ import random
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Type
 import urllib.request
+import dill
 
 from genlm.eval.core import EvaluationResult, Instance, Dataset, Evaluator
 
 log = logging.getLogger(__name__)
+
+# Recommended constraint types for use with CollieConstraintPotential
+RECOMMENDED_CONSTRAINT_TYPES = [
+    # Word count constraints
+    "wiki_c01",
+    "guten_c01",
+    "ccnews_c01",
+    # Character count constraints
+    "wiki_c04",
+    "guten_c04",
+    "ccnews_c04",
+    # Sentence count constraints
+    "wiki_c11",
+    "guten_c11",
+    "ccnews_c11",
+]
+
+# All available constraint types in Collie dataset
+ALL_CONSTRAINT_TYPES = [
+    # Simple count constraints
+    "wiki_c01",
+    "wiki_c04",
+    "wiki_c11" "guten_c01",
+    "guten_c04",
+    "guten_c11",
+    "ccnews_c01",
+    "ccnews_c04",
+    "ccnews_c11",
+    # More complex constraints
+    "wiki_c05",
+    "wiki_c14",
+    "guten_c05",
+    "guten_c14",
+    "ccnews_c05",
+    "ccnews_c14",
+]
 
 ################
 # Collie Data  #
@@ -21,7 +58,7 @@ class CollieInstance(Instance):
     targets: Any
     metadata: Dict[str, Any]
     constraint_type: str
-    constraint: Any  # The actual Collie constraint object
+    constraint: Any
 
 
 class CollieDataset(Dataset[CollieInstance]):
@@ -58,6 +95,8 @@ class CollieDataset(Dataset[CollieInstance]):
         cls,
         constraint_types: Optional[Sequence[str]] = None,
         max_instances: Optional[int] = None,
+        max_example_length: Optional[int] = None,
+        max_prompt_length: Optional[int] = None,
         shuffle: bool = False,
         seed: int = 1234,
         cache_dir: Optional[str] = None,
@@ -68,8 +107,14 @@ class CollieDataset(Dataset[CollieInstance]):
         https://github.com/princeton-nlp/Collie
 
         Args:
-            constraint_types: Optional list of constraint types to filter by
+            constraint_types: Optional list of constraint types to filter by.
+                For AWRS with potentials, simple count-based constraints work best
+                (e.g., ['wiki_c01', 'guten_c01', 'ccnews_c01'] for word count).
             max_instances: Maximum number of instances to load
+            max_example_length: Maximum character length of example field.
+                Useful for filtering to shorter, more manageable instances.
+            max_prompt_length: Maximum character length of prompt field.
+                Useful for reducing computational requirements.
             shuffle: Whether to shuffle the dataset
             seed: Random seed for shuffling
             cache_dir: Optional cache directory for the dill file
@@ -77,14 +122,6 @@ class CollieDataset(Dataset[CollieInstance]):
         Returns:
             CollieDataset instance
         """
-        try:
-            import dill
-        except ImportError:
-            raise ImportError(
-                "dill is required to load the official Collie dataset. "
-                "Install with: pip install dill"
-            )
-
         # Set up cache directory
         if cache_dir is None:
             cache_dir = Path.home() / ".cache" / "genlm-eval" / "collie"
@@ -125,6 +162,24 @@ class CollieDataset(Dataset[CollieInstance]):
                 if r.get("constraint_type", "").lower() in constraint_set
             ]
 
+        # Filter by example length
+        if max_example_length is not None:
+            original_count = len(rows)
+            rows = [r for r in rows if len(r.get("example", "")) <= max_example_length]
+            log.info(
+                f"Filtered by example length ≤ {max_example_length}: "
+                f"{original_count} → {len(rows)} instances"
+            )
+
+        # Filter by prompt length
+        if max_prompt_length is not None:
+            original_count = len(rows)
+            rows = [r for r in rows if len(r.get("prompt", "")) <= max_prompt_length]
+            log.info(
+                f"Filtered by prompt length ≤ {max_prompt_length}: "
+                f"{original_count} → {len(rows)} instances"
+            )
+
         # Shuffle if requested
         if shuffle:
             rnd = random.Random(seed)
@@ -151,13 +206,6 @@ class CollieEvaluator(Evaluator[CollieInstance]):
 
     def __init__(self):
         """Initialize the Collie evaluator."""
-        # Verify collie-bench is installed
-        try:
-            import collie  # type: ignore # noqa: F401
-        except ImportError:
-            raise ImportError(
-                "collie-bench library is required. Install with: pip install collie-bench"
-            )
 
     def evaluate_sample(
         self, instance: CollieInstance, response: str
@@ -177,8 +225,7 @@ class CollieEvaluator(Evaluator[CollieInstance]):
             )
 
         response = response.strip()
-
-        # Use the constraint object directly - no string parsing needed!
+        # Use the constraint object directly
         try:
             is_valid = bool(instance.constraint.check(response, instance.targets))
         except Exception as e:
@@ -198,6 +245,8 @@ class CollieEvaluator(Evaluator[CollieInstance]):
 ##########################
 # Prompt formatter (LM)  #
 ##########################
+
+SYSTEM_PROMPT = "You are a helpful assistant that generates text that satisfies the constraints provided."
 
 
 def default_prompt_formatter(
@@ -224,7 +273,7 @@ def default_prompt_formatter(
                 tokenize=True,
                 add_generation_prompt=True,
             )
-        # Fallback: treat as plain prompt formatting.
         return tokenizer.encode(instance.prompt)
     else:
-        return tokenizer.encode(instance.prompt)
+        prompt = instance.prompt + "Example: " + instance.example
+        return tokenizer.encode(prompt)
