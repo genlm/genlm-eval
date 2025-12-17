@@ -69,6 +69,11 @@ goal_inference = [
     "planetarium @ git+https://github.com/samuki/planetarium.git"
 ]
 
+collie = [
+    "dill",
+    "collie-bench",
+]
+
 test = [
     "genlm-control>=0.2.1",
     "coverage",
