@@ -68,3 +68,11 @@ Evaluate models on inferring goals from natural language descriptions:
 - Data: Small instances form the Blocksworld subset of the Planetarium dataset.
 
 [View Example](domains/goal_inference.ipynb)
+
+#### Grade School Math (GSM8K)
+Evaluate models on solving grade school math word problems:
+
+- Task: Solve multi-step math word problems and provide the correct numerical answer
+- Data: GSM8K dataset with 8,500 grade school math problems
+
+[View Example](domains/gsm8k.ipynb)
