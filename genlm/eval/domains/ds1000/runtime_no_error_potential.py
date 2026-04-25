@@ -1,4 +1,5 @@
 from typing import Callable, Dict, List, Optional
+import asyncio
 import tempfile
 import subprocess
 import sys
@@ -51,10 +52,26 @@ class DS1000RuntimeNoErrorPotential(Potential):
     def _bytes_to_str(self, toks):
         if not toks:
             return ""
+        if isinstance(toks, str):
+            return toks
+        if isinstance(toks, bytes):
+            return toks.decode("utf-8", errors="ignore")
+        # genlm-control/vLLM contexts may be either byte tokens or integer byte ids.
+        # Normalize both forms before decoding so the potential is robust across
+        # backend/token-map representations.
+        byte_pieces = []
+        for tok in toks:
+            if isinstance(tok, int):
+                byte_pieces.append(bytes([tok]))
+            elif isinstance(tok, bytes):
+                byte_pieces.append(tok)
+            else:
+                byte_pieces.append(str(tok).encode("utf-8", errors="ignore"))
+        raw = b"".join(byte_pieces)
         try:
-            bytes_str = b"".join(toks).decode("utf-8", errors="ignore")
+            bytes_str = raw.decode("utf-8", errors="ignore")
         except UnicodeDecodeError:
-            bytes_str = b"".join(toks).decode("latin-1", errors="ignore")
+            bytes_str = raw.decode("latin-1", errors="ignore")
         return bytes_str
 
     async def prefix(self, context: List[bytes]) -> float:
@@ -141,19 +158,29 @@ class DS1000RuntimeNoErrorPotential(Potential):
                     },
                 )
 
-                proc = subprocess.run(
-                    [self.python_executable, "-B", path],
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    timeout=self.timeout_seconds,
+                proc = await asyncio.create_subprocess_exec(
+                    self.python_executable,
+                    "-B",
+                    path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
                     env=env,
                     cwd=td,
                 )
+                try:
+                    stdout_b, stderr_b = await asyncio.wait_for(
+                        proc.communicate(), timeout=self.timeout_seconds
+                    )
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.communicate()
+                    return float("-inf")
         except subprocess.TimeoutExpired:
             return float("-inf")
 
-        out = (proc.stdout or "") + (proc.stderr or "")
+        out = stdout_b.decode("utf-8", errors="replace") + stderr_b.decode(
+            "utf-8", errors="replace"
+        )
         ok = any(line.strip() == OK for line in out.splitlines())
         bad = any(line.strip() == BAD for line in out.splitlines())
         syntax = any(line.strip() == SYNTAX for line in out.splitlines())
