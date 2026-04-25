@@ -1,5 +1,6 @@
 from typing import Callable, Dict, List, Optional
 import asyncio
+from collections import OrderedDict
 import tempfile
 import subprocess
 import sys
@@ -33,6 +34,14 @@ class DS1000RuntimeNoErrorPotential(Potential):
         self.extra_env = dict(extra_env or {})
         self.last_was_syntax_error = False
         self.f = f
+        # SMC frequently clones particles into identical or repeated prefixes.
+        # Cache exact postprocessed code strings to avoid launching duplicate
+        # DS1000 subprocess checks. The cache is per potential instance, whose
+        # code_context / timeout / environment are fixed.
+        self._score_cache = OrderedDict()
+        self._score_cache_maxsize = 4096
+        self.cache_hits = 0
+        self.cache_misses = 0
 
     def coerce(
         self,
@@ -103,6 +112,15 @@ class DS1000RuntimeNoErrorPotential(Potential):
         Returns:
             float - 0.0 if no error, -inf otherwise.
         """
+        cached = self._score_cache.get(complete_code)
+        if cached is not None:
+            self._score_cache.move_to_end(complete_code)
+            self.cache_hits += 1
+            value, syntax_error = cached
+            self.last_was_syntax_error = syntax_error
+            return value
+        self.cache_misses += 1
+
         OK, BAD, SYNTAX = "<<<OK>>>", "<<<BAD>>>", "<<<SYNTAX>>>"
 
         script = textwrap.dedent(
@@ -187,4 +205,9 @@ class DS1000RuntimeNoErrorPotential(Potential):
 
         self.last_was_syntax_error = bool(syntax)
         bad = bad or syntax
-        return 0.0 if ok and not bad else float("-inf")
+        value = 0.0 if ok and not bad else float("-inf")
+        self._score_cache[complete_code] = (value, self.last_was_syntax_error)
+        self._score_cache.move_to_end(complete_code)
+        if len(self._score_cache) > self._score_cache_maxsize:
+            self._score_cache.popitem(last=False)
+        return value
