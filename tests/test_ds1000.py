@@ -215,6 +215,56 @@ def test_runtime_potential_coerce_adopts_vocab():
     assert list(pot2.vocab) == [b"a", b"b"]
 
 
+@pytest.mark.asyncio
+async def test_runtime_potential_cache_replays_value_and_syntax_flag():
+    pot = DS1000RuntimeNoErrorPotential(
+        code_context=harness_expect_foo_eq_42(), timeout_seconds=0.5
+    )
+    bad_syntax = "def foo(\n"                  # -> -inf, syntax_error=True
+    good = "def foo():\n    return 42\n"       # -> 0.0,  syntax_error=False
+
+    s1 = await pot.prefix([bad_syntax.encode()])
+    assert s1 == float("-inf") and pot.last_was_syntax_error is True
+    s2 = await pot.prefix([good.encode()])
+    assert s2 == 0.0 and pot.last_was_syntax_error is False
+    assert pot.cache_hits == 0 and pot.cache_misses == 2
+
+    # Replay: must hit cache and restore the per-call flag correctly.
+    s3 = await pot.prefix([bad_syntax.encode()])
+    assert s3 == float("-inf") and pot.last_was_syntax_error is True
+    s4 = await pot.prefix([good.encode()])
+    assert s4 == 0.0 and pot.last_was_syntax_error is False
+    assert pot.cache_hits == 2 and pot.cache_misses == 2
+
+
+@pytest.mark.asyncio
+async def test_runtime_potential_timeout_is_not_cached():
+    code_context = (
+        "def test_execution(solution):\n"
+        "    while True:\n"
+        "        pass\n"
+    )
+    pot = DS1000RuntimeNoErrorPotential(code_context=code_context, timeout_seconds=0.2)
+    score = await pot.complete([b"x = 1\n\n"])
+    assert score == float("-inf")
+    assert len(pot._score_cache) == 0
+
+
+@pytest.mark.parametrize(
+    "inp,expected",
+    [
+        ("hello", "hello"),
+        (b"hello", "hello"),
+        ([104, 105], "hi"),                   # List[int] byte ids
+        ([b"hi", 32, b"there"], "hi there"),  # mixed list
+        ([], ""),
+    ],
+)
+def test_runtime_potential_bytes_to_str_input_shapes(inp, expected):
+    pot = DS1000RuntimeNoErrorPotential(code_context="")
+    assert pot._bytes_to_str(inp) == expected
+
+
 # ------------------------------ #
 # Additional evaluator scenarios #
 # ------------------------------ #
