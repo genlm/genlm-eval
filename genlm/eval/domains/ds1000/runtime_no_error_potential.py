@@ -100,6 +100,11 @@ class DS1000RuntimeNoErrorPotential(Potential):
             context = self.f(context)
         code = self._bytes_to_str(context)
         code = _postprocess_code(code)
+        # Empty completion don't define `result`, so the harness will
+        # always raise KeyError. Skip the subprocess and return -inf directly.
+        # The LM often emits EOS / "</code>" as the first token.
+        if not code:
+            return float("-inf")
         out = await self._score_no_error(code)
         return out
 
