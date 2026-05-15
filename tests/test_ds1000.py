@@ -296,3 +296,16 @@ def test_harness_timeout_in_test_execution(evaluator):
     instance = make_instance(code_context)
     res = evaluator.evaluate_sample(instance, "def foo():\n    return 42\n")
     assert res.score == 0.0
+
+
+@pytest.mark.parametrize("context", [[], list(b"</code>")])
+def test_complete_empty_short_circuits_subprocess(context, monkeypatch):
+    import asyncio
+    pot = DS1000RuntimeNoErrorPotential(code_context=harness_expect_foo_eq_42())
+    called = []
+    async def _spy(self, code):
+        called.append(code)
+        return 0.0
+    monkeypatch.setattr(DS1000RuntimeNoErrorPotential, "_score_no_error", _spy)
+    assert asyncio.run(pot.complete(context)) == float("-inf")
+    assert called == []
