@@ -115,6 +115,14 @@ def test_f_transform_is_applied():
     assert len(seen) == 2
 
 
+def test_timeout_is_not_cached():
+    """Timeouts are transient; the verdict must NOT be cached."""
+    ctx = "def test_execution(answer):\n    while True:\n        pass\n"
+    p = DS1000RuntimeNoErrorPotential(code_context=ctx, timeout_seconds=0.3)
+    assert _run(p.complete(_bytes("x = 1"))) == float("-inf")
+    assert len(p._score_cache) == 0
+
+
 def test_cache_evicts_oldest_when_full():
     """LRU cache must evict when it exceeds ``_score_cache_maxsize``."""
     p = DS1000RuntimeNoErrorPotential(code_context=CTX, timeout_seconds=10.0)

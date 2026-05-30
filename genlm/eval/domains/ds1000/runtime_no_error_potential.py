@@ -103,6 +103,10 @@ class DS1000RuntimeNoErrorPotential(Potential):
         self.cache_misses += 1
 
         result = await _fork_score(self.code_context, complete_code, self.timeout_seconds)
+        if result is None:
+            # Timeout / dead worker: don't cache, the same code may succeed next time.
+            self.last_was_syntax_error = False
+            return float("-inf")
         ok, bad, syntax = (result == _OK), (result == _BAD), (result == _SYN)
         self.last_was_syntax_error = bool(syntax)
         value = 0.0 if (ok and not (bad or syntax)) else float("-inf")
