@@ -148,13 +148,16 @@ def _child_score(code_context: str, answer: str, conn) -> None:
         exec(code_context, g, g)
         te = g.get("test_execution")
         if not callable(te):
-            conn.send(_BAD); return
+            conn.send(_BAD)
+            return
         try:
             ast.parse(answer, filename="<answer>", mode="exec")
         except SyntaxError:
-            conn.send(_SYN); return
+            conn.send(_SYN)
+            return
         try:
-            te(answer); conn.send(_OK)
+            te(answer)
+            conn.send(_OK)
         except AssertionError:
             conn.send(_OK)
         except SyntaxError:
@@ -180,7 +183,8 @@ def _fork_score_sync(code_context: str, answer: str, timeout: float) -> Optional
     child.close()
     try:
         if not parent.poll(timeout):
-            p.kill(); p.join(0.5)
+            p.kill()
+            p.join(0.5)
             return None
         return parent.recv()
     except (EOFError, OSError):
