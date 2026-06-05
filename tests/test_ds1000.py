@@ -64,7 +64,7 @@ def test_dataset():
     assert len(ds) == 2
     assert ds.schema is DS1000Instance
     items = list(iter(ds))
-    assert items[0].prompt == "P1"
+    assert items[0].prompt == "P1 "  # prompt is kept verbatim
     assert items[0].code_context == "C1"
     assert items[0].metadata["library"] == "pandas"
     assert items[0].reference_code == "print('ok')"
