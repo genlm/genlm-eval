@@ -40,7 +40,7 @@ class DS1000Dataset(Dataset[DS1000Instance]):
     def __iter__(self) -> Iterator[DS1000Instance]:
         for i, row in enumerate(self._rows):
             yield DS1000Instance(
-                prompt=str(row.get("prompt", "")).strip(),
+                prompt=str(row.get("prompt", "")),
                 code_context=str(row.get("code_context", "")).strip(),
                 reference_code=row.get("reference_code"),
                 metadata=(row.get("metadata") or {}),
