@@ -1,14 +1,7 @@
-"""LiveCodeBench (Jain et al., 2024) domain for genlm-eval.
+"""LiveCodeBench (Jain et al., 2024) domain for genlm-eval, mirroring ds1000.
 
-Mirrors the ds1000 domain: a pydantic ``Instance``, a ``Dataset`` with ``from_hf``
-(+ ``from_jsonl``) loaders, and an ``Evaluator`` that scores a generation by running
-it against the problem's test cases via the vendored official LCB harness
-(``harness.passed_all``). Ported from the genlm/latent PR (jac/add-livecodebench),
-which deferred "lifting the domain into genlm-eval".
-
-Correctness signal: extract the code block from the completion, then run it against
-``eval_sample['input_output']`` (stdin/stdout or call-based) in a forked child. Strict
-0/1 per problem (all test cases must pass).
+Score = extract the code block from the completion and run it against the problem's
+test cases (stdin or call-based) via the vendored official LCB harness; strict 0/1.
 """
 from __future__ import annotations
 
@@ -44,14 +37,12 @@ class LiveCodeBenchInstance(Instance):
     testtype: str = "stdin"
     contest_date: str = ""
     release: str = ""
-    eval_sample: Dict[str, str]
+    eval_sample: Dict[str, str] = {}  # may be empty for a prompts-only (generation) snapshot
     metadata: Dict[str, Any] = {}
 
 
 def _stratified_split(rows: List[dict], split: str, test_frac: float, seed: int) -> List[dict]:
-    """Per-(testtype, difficulty) disjoint train/test split (ported from the latent
-    loader). testtype is the biggest behavioral axis, so balancing it keeps the
-    eval pass-rate honest. Returns all rows when ``split`` is None."""
+    """Stratified (testtype, difficulty) train/test split; all rows when split=None."""
     if split is None:
         return rows
     by_key: Dict[Any, list] = {}
@@ -113,7 +104,7 @@ class LiveCodeBenchDataset(Dataset[LiveCodeBenchInstance]):
                 testtype=str(row.get("testtype", "stdin")),
                 contest_date=str(row.get("contest_date", "") or ""),
                 release=str(row.get("release", "") or ""),
-                eval_sample=row["eval_sample"],
+                eval_sample=(row.get("eval_sample") or {}),
                 metadata=(row.get("metadata") or {}),
             )
 
@@ -143,15 +134,16 @@ class LiveCodeBenchDataset(Dataset[LiveCodeBenchInstance]):
         seed: int = 12345,
         max_instances: Optional[int] = None,
         max_tests_per_problem: Optional[int] = None,
+        cumulative: bool = True,
         cache_dir: Optional[str] = None,
     ) -> "LiveCodeBenchDataset":
         """Load+decode ``livecodebench/code_generation_lite`` (needs internet / HF cache).
 
-        Defaults to the FULL window (``split=None``) to match the official LCB
-        protocol; ``contest_date`` is filtered to ``>= start_date`` (default
-        2024-01-01, after the Llama-3.x training cutoffs). Pass ``split='test'`` for
-        the held-out stratified split (train/eval use only)."""
-        rows = list(iter_release_rows(release, max_tests=max_tests_per_problem, cache_dir=cache_dir))
+        ``cumulative=True`` = official version_tag semantics (all problems through
+        ``release``). Defaults to the full window (``split=None``) with
+        ``contest_date >= start_date`` (2024-01-01 = after the Llama-3.x cutoffs)."""
+        rows = list(iter_release_rows(release, max_tests=max_tests_per_problem,
+                                      cache_dir=cache_dir, cumulative=cumulative))
         return cls._build(rows, start_date, end_date, difficulties, testtypes,
                           split, test_frac, seed, max_instances)
 
@@ -181,9 +173,7 @@ class LiveCodeBenchDataset(Dataset[LiveCodeBenchInstance]):
 
 
 class LiveCodeBenchEvaluator(Evaluator[LiveCodeBenchInstance]):
-    """Scores a generation by running its extracted code against the problem's test
-    cases (strict 0/1). The harness forks a child per problem (the vendored official
-    LCB ``run_test`` mutates the interpreter + uses ``signal.alarm``)."""
+    """Runs a generation's extracted code against the problem's test cases (strict 0/1)."""
 
     def __init__(self, timeout_seconds: float = 6.0, max_log_chars: int = 4000):
         self.timeout_seconds = float(timeout_seconds)
@@ -217,4 +207,5 @@ def default_prompt_formatter(tokenizer, instance: LiveCodeBenchInstance,
     otherwise a plain system+body completion prompt (for base models)."""
     row = {"question_content": instance.question_content, "starter_code": instance.starter_code}
     text = format_lcb_prompt(row, tokenizer=tokenizer, chat_template=use_chat_format)
-    return tokenizer.encode(text)
+    # Chat template already includes the BOS; avoid a second one on re-encode.
+    return tokenizer.encode(text, add_special_tokens=not use_chat_format)

@@ -41,6 +41,8 @@ def _load_solutions():
 def test_stdin_prompt_has_stdin_instruction():
     p = format_lcb_prompt({"question_content": "Print n*2.", "starter_code": ""})
     assert "Print n*2." in p and "stdin" in p.lower() and "```python" in p
+    # official lcb_runner structure
+    assert "### Question:" in p and "### Format:" in p and "### Answer:" in p
 
 
 def test_functional_prompt_includes_starter_code():
@@ -54,8 +56,9 @@ def test_extract_last_fenced_block():
     assert extract_code(out).strip() == "print(2)"
 
 
-def test_extract_no_fence_returns_stripped():
-    assert extract_code("  print(1)  ") == "print(1)"
+def test_extract_no_fence_returns_empty():
+    # Official lcb_runner extract_code returns "" when there are <2 fences.
+    assert extract_code("  print(1)  ") == ""
 
 
 def test_extract_handles_bare_fence():
@@ -150,6 +153,29 @@ async def test_critic_prefix_is_zero():
 
 def test_template_is_identity():
     assert livecodebench_template().format_prompt("hello prompt") == "hello prompt"
+
+
+class _FakeTok:
+    """Records the add_special_tokens flag; apply_chat_template emits a BOS literal."""
+    def __init__(self):
+        self.last_add_special = None
+    def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True):
+        assert tokenize is False
+        return "<BOS>" + messages[-1]["content"]
+    def encode(self, text, add_special_tokens=True):
+        self.last_add_special = add_special_tokens
+        return [1, 2, 3]
+
+
+def test_prompt_formatter_avoids_double_bos_on_chat_path():
+    from genlm.eval.domains.livecodebench import default_prompt_formatter as fmt
+    inst = LiveCodeBenchInstance(instance_id="x", question_id="x",
+                                 question_content="q", eval_sample={"input_output": "{}"})
+    tok = _FakeTok()
+    fmt(tok, inst, use_chat_format=True)
+    assert tok.last_add_special is False    # chat template already added BOS
+    fmt(tok, inst, use_chat_format=False)
+    assert tok.last_add_special is True     # base path must add BOS
 
 
 # ------------------------------ fetch decode ------------------------------ #

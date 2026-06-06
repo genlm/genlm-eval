@@ -1,14 +1,9 @@
 """Load + decode LiveCodeBench ``code_generation_lite`` releases.
 
-Ports the snapshot-builder logic from the genlm/latent PR
-(``data/livecodebench/fetch.py``): download one release's ``testN.jsonl`` via
-``huggingface_hub`` (bypassing the ``datasets`` builder and its pyarrow
-offset-overflow on the large ``private_test_cases`` column), decode the private
-tests, and emit a clean row with a harness-ready ``eval_sample`` per problem.
-
-``iter_release_rows`` is what ``LiveCodeBenchDataset.from_hf`` consumes; the
-``build_row`` / ``derive_testtype`` / ``_decode_private`` helpers are kept public
-so the unit tests can exercise the decode chain directly.
+Downloads a release's ``testN.jsonl`` via ``huggingface_hub`` (the ``datasets``
+builder hits a pyarrow offset-overflow on the large ``private_test_cases`` column),
+decodes the private tests, and emits a harness-ready ``eval_sample`` per problem.
+``iter_release_rows`` feeds ``LiveCodeBenchDataset.from_hf``.
 """
 from __future__ import annotations
 
@@ -77,17 +72,29 @@ def _release_filename(release: str) -> str:
 
 
 def iter_release_rows(release: str = "release_v6", max_tests: Optional[int] = None,
-                      cache_dir: Optional[str] = None) -> Iterator[Dict[str, Any]]:
-    """Download one release of ``code_generation_lite`` and yield clean built rows.
+                      cache_dir: Optional[str] = None, cumulative: bool = True
+                      ) -> Iterator[Dict[str, Any]]:
+    """Yield clean built rows for a ``code_generation_lite`` release (needs HF cache).
 
-    Requires internet / a warm HF cache (run on a login node on offline clusters).
+    Each ``testN.jsonl`` is the incremental window for vN. ``cumulative=True`` (official
+    version_tag semantics) loads ``test.jsonl``..``testN.jsonl`` de-duped by question_id
+    (release_v6 == ~1055 problems); ``cumulative=False`` loads only that window.
     """
     from huggingface_hub import hf_hub_download
 
-    path = hf_hub_download(repo_id=HF_REPO, filename=_release_filename(release),
-                           repo_type="dataset", cache_dir=cache_dir)
-    with open(path) as fin:
-        for line in fin:
-            if not line.strip():
-                continue
-            yield build_row(json.loads(line), release=release, max_tests=max_tests)
+    n = int(release.rsplit("_v", 1)[1])
+    tags = [f"release_v{i}" for i in range(1, n + 1)] if cumulative else [release]
+    seen = set()
+    for tag in tags:
+        path = hf_hub_download(repo_id=HF_REPO, filename=_release_filename(tag),
+                               repo_type="dataset", cache_dir=cache_dir)
+        with open(path) as fin:
+            for line in fin:
+                if not line.strip():
+                    continue
+                row = build_row(json.loads(line), release=tag, max_tests=max_tests)
+                qid = row["question_id"]
+                if qid in seen:
+                    continue
+                seen.add(qid)
+                yield row

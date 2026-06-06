@@ -1,13 +1,7 @@
-"""LiveCodeBench correctness Potential + identity prompt template.
+"""LiveCodeBench correctness Potential + identity prompt template (from latent critic.py).
 
-Ported from the genlm/latent PR's ``critic.py`` (``LCBCorrectnessCritic``). A
-terminal 0/1 constraint for SMC-style decoding: ``complete`` returns ``0.0`` iff the
-decoded particle's extracted code passes every test case, else ``-inf`` (syntax /
-runtime error, wrong output, timeout all collapse to ``-inf``). ``prefix`` returns
-``0.0`` (no in-rollout pruning). Mirrors ds1000's runtime-no-error potential in role.
-
-Requires genlm-control (the ``livecodebench`` extra); not needed for raw-decoding
-sweeps, only for constrained generation.
+Terminal 0/1 constraint for SMC: ``complete`` -> 0.0 if the decoded code passes all
+tests else -inf; ``prefix`` -> 0.0. Needs genlm-control; only for constrained generation.
 """
 from __future__ import annotations
 
