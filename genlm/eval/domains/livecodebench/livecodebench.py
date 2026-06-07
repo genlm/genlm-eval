@@ -200,12 +200,14 @@ class LiveCodeBenchEvaluator(Evaluator[LiveCodeBenchInstance]):
 
 
 def default_prompt_formatter(tokenizer, instance: LiveCodeBenchInstance,
-                             use_chat_format: bool = False) -> List[int]:
+                             use_chat_format: bool = False, style: str = "generic") -> List[int]:
     """Build the LCB prompt for ``instance`` and return token ids.
 
-    ``use_chat_format=True`` applies the model chat template (for instruct models);
-    otherwise a plain system+body completion prompt (for base models)."""
+    style="generic" + use_chat_format=True = LLaMa3 lcb_runner style (chat template).
+    style="codeqwen" = CodeQwenInstruct style (raw <|im_*|> completion string)."""
     row = {"question_content": instance.question_content, "starter_code": instance.starter_code}
-    text = format_lcb_prompt(row, tokenizer=tokenizer, chat_template=use_chat_format)
+    text = format_lcb_prompt(row, tokenizer=tokenizer, chat_template=use_chat_format, style=style)
+    if style == "codeqwen":
+        return tokenizer.encode(text)  # manual chat tokens; vLLM-default specials
     # Chat template already includes the BOS; avoid a second one on re-encode.
     return tokenizer.encode(text, add_special_tokens=not use_chat_format)

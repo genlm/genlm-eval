@@ -15,6 +15,11 @@ SYSTEM_MESSAGE = (
     "specification) and will generate a correct Python program that matches the "
     "specification and passes all tests."
 )
+# lcb_runner CodeQwenInstruct style (manual chat tokens, NOT apply_chat_template).
+SYSTEM_MESSAGE_CODEQWEN = (
+    "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user"
+)
+DEFAULT_STOP = ["###"]  # lcb_runner default --stop
 
 # Verbatim from lcb_runner PromptConstants.
 _FORMATTING_WITH_STARTER = (
@@ -42,13 +47,32 @@ def _user_body(question_content: str, starter_code: str) -> str:
     return body
 
 
-def format_lcb_prompt(row: Mapping[str, str], tokenizer=None,
-                      chat_template: bool = False) -> str:
-    """Full prompt string from a snapshot row (needs question_content, starter_code).
+def _codeqwen_body(question_content: str, starter_code: str) -> str:
+    """Official get_codeqwen_question_template_answer (manual <|im_*|> tokens)."""
+    body = ("You will be given a question (problem specification) and will generate a "
+            "correct Python program that matches the specification and passes all tests. "
+            "You will NOT return anything except for the program.\n\n")
+    body += f"Question: {question_content}\n\n"
+    if starter_code:
+        body += f"{_FORMATTING_WITH_STARTER}\n```python\n{starter_code}\n```\n\n<|im_end|>\n"
+    else:
+        body += f"{_FORMATTING_WITHOUT_STARTER}\n```python\n# YOUR CODE HERE\n```\n\n<|im_end|>\n"
+    body += "<|im_start|>assistant\n"
+    return body
 
-    chat_template=True: system + user template via the model chat template (exact
-    official chat protocol). Else: SYSTEM_MESSAGE + template as a completion string."""
-    body = _user_body(row.get("question_content", ""), row.get("starter_code", "") or "")
+
+def format_lcb_prompt(row: Mapping[str, str], tokenizer=None,
+                      chat_template: bool = False, style: str = "generic") -> str:
+    """Full prompt string from a snapshot row, matching an lcb_runner LMStyle.
+
+    style="generic" (LLaMa3 etc.): SYSTEM_MESSAGE + ### Question/Format/Answer template,
+    via the model chat template when chat_template=True. style="codeqwen"
+    (CodeQwenInstruct): the model-specific "helpful assistant" + manual <|im_*|> prompt
+    (a raw completion string, no apply_chat_template)."""
+    qc, sc = row.get("question_content", ""), row.get("starter_code", "") or ""
+    if style == "codeqwen":
+        return f"{SYSTEM_MESSAGE_CODEQWEN}\n{_codeqwen_body(qc, sc)}"
+    body = _user_body(qc, sc)
     if chat_template and tokenizer is not None:
         messages = [{"role": "system", "content": SYSTEM_MESSAGE},
                     {"role": "user", "content": body}]
