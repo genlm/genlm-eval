@@ -4,8 +4,11 @@ Offline: uses the committed fixtures tests/fixtures/lcb_sample.jsonl +
 tests/fixtures/lcb_solutions.py (no GPU/network). The harness forks a child per
 problem and runs real subprocess code execution, so these are CPU-only but slowish.
 """
+import base64
 import importlib.util
 import json
+import pickle
+import zlib
 from pathlib import Path
 
 import pytest
@@ -205,7 +208,6 @@ def _functional_raw():
 
 
 def _stdin_raw_compressed():
-    import base64, pickle, zlib
     private = [{"input": "10\n", "output": "20\n", "testtype": "stdin"}]
     blob = base64.b64encode(zlib.compress(pickle.dumps(json.dumps(private)))).decode("utf-8")
     return {"question_content": "Print 2n.", "platform": "codeforces",
@@ -310,7 +312,7 @@ def test_max_instances_caps(tmp_path):
 
 # ------------------------------ committed fixture ------------------------------ #
 
-_ROWS = [json.loads(l) for l in SAMPLE.open() if l.strip()] if SAMPLE.exists() else []
+_ROWS = [json.loads(line) for line in SAMPLE.open() if line.strip()] if SAMPLE.exists() else []
 
 
 @pytest.mark.skipif(not _ROWS, reason="fixture missing")
