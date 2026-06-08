@@ -13,9 +13,9 @@ from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Seque
 from genlm.eval.core import Dataset, Instance
 from genlm.eval.core.evaluator import EvaluationResult, Evaluator
 
-from genlm.eval.domains.livecodebench._fetch import iter_release_rows
 from genlm.eval.domains.livecodebench.harness import passed_all
-from genlm.eval.domains.livecodebench.prompts import extract_code, format_lcb_prompt
+from genlm.eval.domains.livecodebench.util.fetch import iter_release_rows
+from genlm.eval.domains.livecodebench.util.prompts import extract_code, format_lcb_prompt
 
 ################
 # Data         #
@@ -37,12 +37,17 @@ class LiveCodeBenchInstance(Instance):
     testtype: str = "stdin"
     contest_date: str = ""
     release: str = ""
+    # Pydantic v2 deep-copies these {} defaults per instance (not shared state).
     eval_sample: Dict[str, str] = {}  # may be empty for a prompts-only (generation) snapshot
     metadata: Dict[str, Any] = {}
 
 
 def _stratified_split(rows: List[dict], split: str, test_frac: float, seed: int) -> List[dict]:
-    """Stratified (testtype, difficulty) train/test split; all rows when split=None."""
+    """Stratified (testtype, difficulty) train/test split; all rows when split=None.
+
+    Determinism is conditional on stable upstream row order (from_hf builds rows in
+    release/file order), since the per-key shuffle seeds off that order.
+    """
     if split is None:
         return rows
     by_key: Dict[Any, list] = {}
@@ -70,7 +75,9 @@ def _filter_rows(rows: Iterable[dict], start_date: Optional[str], end_date: Opti
     tt_set = {t.lower() for t in testtypes} if testtypes else None
     out = []
     for r in rows:
-        d = (r.get("contest_date") or "")[:10]  # ISO dates sort lexically
+        # contest_date is ISO-8601, so the YYYY-MM-DD prefix sorts lexically; undated
+        # rows (empty contest_date) are dropped whenever a date window is set.
+        d = (r.get("contest_date") or "")[:10]
         if start_date and (not d or d < start_date):
             continue
         if end_date and (not d or d > end_date):
@@ -162,7 +169,8 @@ class LiveCodeBenchDataset(Dataset[LiveCodeBenchInstance]):
     ) -> "LiveCodeBenchDataset":
         """Load a prebuilt snapshot JSONL (one built row per line; offline-friendly)."""
         p = Path(path)
-        rows = [json.loads(line) for line in p.open() if line.strip()]
+        with p.open() as f:
+            rows = [json.loads(line) for line in f if line.strip()]
         return cls._build(rows, start_date, end_date, difficulties, testtypes,
                           split, test_frac, seed, max_instances)
 
@@ -183,6 +191,9 @@ class LiveCodeBenchEvaluator(Evaluator[LiveCodeBenchInstance]):
         code = extract_code(response)
         if not code:
             return EvaluationResult(score=0.0, desc="empty code", metadata={"question_id": instance.question_id})
+        if not instance.eval_sample or "input_output" not in instance.eval_sample:
+            return EvaluationResult(score=0.0, desc="missing eval_sample",
+                                    metadata={"question_id": instance.question_id})
         ok = passed_all(instance.eval_sample, code, timeout=self.timeout_seconds)
         desc = code if len(code) <= self.max_log_chars else code[: self.max_log_chars] + "\n...[truncated]"
         return EvaluationResult(

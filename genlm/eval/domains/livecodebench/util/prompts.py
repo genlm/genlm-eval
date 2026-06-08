@@ -1,10 +1,9 @@
-"""LCB prompt formatting + code extraction, faithful to official ``lcb_runner``.
+"""LCB prompt formatting + code extraction, as in the official ``lcb_runner``.
 
-Matches ``lcb_runner/prompts/code_generation.py`` (``get_generic_question_template_answer``
-+ ``SYSTEM_MESSAGE_GENERIC``) and ``lcb_runner/utils/extraction_utils.extract_code``
-(generic/chat style) so numbers are leaderboard-comparable. NOTE: official *base*-model
-eval uses few-shot examples; the non-chat path here is zero-shot (system + template),
-a documented deviation for base models — the chat path is exact.
+Prompt assembly and ``extract_code`` are kept identical to ``lcb_runner`` (generic /
+CodeQwen styles) so numbers are leaderboard-comparable. The only deviation: for
+base models the non-chat path is zero-shot (lcb_runner few-shots them); the chat
+path is exact.
 """
 from __future__ import annotations
 
@@ -83,7 +82,9 @@ def format_lcb_prompt(row: Mapping[str, str], tokenizer=None,
 def extract_code(model_output: str) -> str:
     """Code between the last two ``` fences; "" if there are fewer than two.
 
-    Matches lcb_runner extraction_utils.extract_code (generic/chat style)."""
+    Matches lcb_runner extraction_utils.extract_code (generic/chat style). With 3+
+    fence lines it returns the last block (an unterminated final block slices to the
+    last fence)."""
     lines = model_output.split("\n")
     fence_idxs = [i for i, ln in enumerate(lines) if "```" in ln]
     if len(fence_idxs) < 2:

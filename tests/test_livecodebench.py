@@ -1,9 +1,8 @@
-"""Tests for the LiveCodeBench domain (ported/merged from the genlm/latent PR's
-seven test_lcb_*.py, adapted to the genlm-eval Dataset/Evaluator API).
+"""Tests for the LiveCodeBench domain.
 
-Offline: uses the committed fixture tests/fixtures/lcb_sample.jsonl +
-tests/fixtures/lcb_solutions.py. No GPU/network. The harness forks a child per
-problem and runs real subprocess code execution, so these are slowish but CPU-only.
+Offline: uses the committed fixtures tests/fixtures/lcb_sample.jsonl +
+tests/fixtures/lcb_solutions.py (no GPU/network). The harness forks a child per
+problem and runs real subprocess code execution, so these are CPU-only but slowish.
 """
 import importlib.util
 import json
@@ -11,12 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from genlm.eval.domains.livecodebench import (
+pytest.importorskip("genlm.control")  # domain __init__ imports the runtime potential
+
+from genlm.eval.domains.livecodebench import (  # noqa: E402
     LiveCodeBenchDataset,
     LiveCodeBenchEvaluator,
     LiveCodeBenchInstance,
-    LCBCorrectnessCritic,
-    livecodebench_template,
+    LiveCodeBenchRuntimeNoErrorPotential,
     format_lcb_prompt,
     extract_code,
     check_correctness,
@@ -65,10 +65,16 @@ def test_extract_handles_bare_fence():
     assert extract_code("```\nprint(3)\n```").strip() == "print(3)"
 
 
+def test_extract_with_three_plus_fences_returns_last_block():
+    # 3+ fences (prose ``` then a real block): returns the last block, per lcb_runner.
+    out = "see ```inline``` then\n```python\nprint(42)\n```\n"
+    assert extract_code(out).strip() == "print(42)"
+
+
 # ------------------------------ harness ------------------------------ #
 
 def test_vendored_run_test_importable():
-    from genlm.eval.domains.livecodebench._vendor_testing_util import run_test
+    from genlm.eval.domains.livecodebench.util.testing_util import run_test
     assert callable(run_test)
 
 
@@ -133,26 +139,35 @@ def _ctx(text: str):
     return [bytes([b]) for b in text.encode("utf-8")] + [EndOfSequence()]
 
 
-@pytest.mark.asyncio
-async def test_critic_complete_passes_returns_zero():
-    crit = LCBCorrectnessCritic(VOCAB, STDIN_SAMPLE, timeout_seconds=6.0)
-    assert await crit.complete(_ctx(GOOD_GEN)) == 0.0
+# Runtime potential: 0.0 if the program runs on every test (right OR wrong answer),
+# -inf if it fails to compile / raises / times out. RUNTIME_WRONG runs but prints the
+# wrong answer (still 0.0); RUNTIME_SYNTAX has a syntax error (never compiles -> -inf).
+RUNTIME_WRONG_GEN = "```python\nimport sys\nn = int(sys.stdin.readline())\nprint(n + 1)\n```"
+RUNTIME_SYNTAX_GEN = "```python\ndef f(:\n    return 1\n```"
 
 
 @pytest.mark.asyncio
-async def test_critic_complete_wrong_returns_neg_inf():
-    crit = LCBCorrectnessCritic(VOCAB, STDIN_SAMPLE, timeout_seconds=6.0)
-    assert await crit.complete(_ctx(BAD_GEN)) == float("-inf")
+async def test_runtime_potential_runs_but_wrong_returns_zero():
+    pot = LiveCodeBenchRuntimeNoErrorPotential(VOCAB, STDIN_SAMPLE, timeout_seconds=6.0)
+    assert await pot.complete(_ctx(RUNTIME_WRONG_GEN)) == 0.0
 
 
 @pytest.mark.asyncio
-async def test_critic_prefix_is_zero():
-    crit = LCBCorrectnessCritic(VOCAB, STDIN_SAMPLE, timeout_seconds=6.0)
-    assert await crit.prefix(_ctx(GOOD_GEN)) == 0.0
+async def test_runtime_potential_syntax_error_returns_neg_inf():
+    pot = LiveCodeBenchRuntimeNoErrorPotential(VOCAB, STDIN_SAMPLE, timeout_seconds=6.0)
+    assert await pot.complete(_ctx(RUNTIME_SYNTAX_GEN)) == float("-inf")
 
 
-def test_template_is_identity():
-    assert livecodebench_template().format_prompt("hello prompt") == "hello prompt"
+@pytest.mark.asyncio
+async def test_runtime_potential_empty_code_returns_neg_inf():
+    pot = LiveCodeBenchRuntimeNoErrorPotential(VOCAB, STDIN_SAMPLE, timeout_seconds=6.0)
+    assert await pot.complete(_ctx("no code fence here")) == float("-inf")
+
+
+@pytest.mark.asyncio
+async def test_runtime_potential_prefix_is_zero():
+    pot = LiveCodeBenchRuntimeNoErrorPotential(VOCAB, STDIN_SAMPLE, timeout_seconds=6.0)
+    assert await pot.prefix(_ctx(RUNTIME_WRONG_GEN)) == 0.0
 
 
 class _FakeTok:

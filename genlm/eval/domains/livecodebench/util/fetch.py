@@ -13,12 +13,18 @@ import pickle
 import zlib
 from typing import Any, Dict, Iterator, List, Mapping, Optional
 
-# HF dataset: the *lite* variant (capped/compressed tests) — NOT ``code_generation``.
+from huggingface_hub import hf_hub_download
+
+# HF Lite variant: https://huggingface.co/datasets/livecodebench/code_generation_lite
 HF_REPO = "livecodebench/code_generation_lite"
 
 
 def _decode_private(field: str) -> List[Dict[str, Any]]:
-    """Plain JSON if possible, else base64 -> zlib -> pickle -> json (LCB chain)."""
+    """Plain JSON if possible, else base64 -> zlib -> pickle -> json (LCB chain).
+
+    The pickle branch runs ``pickle.loads`` on dataset bytes, so loading a release
+    trusts the dataset publisher (same trust boundary as official lcb_runner).
+    """
     try:
         return json.loads(field)
     except Exception:
@@ -65,9 +71,19 @@ def build_row(raw: Mapping[str, Any], release: str, max_tests: Optional[int] = N
     }
 
 
+def _release_num(release: str) -> int:
+    """``release_vN`` -> ``N``; raises on anything but that shape."""
+    if "_v" not in release:
+        raise ValueError(f"release must be 'release_vN'; got {release!r}")
+    try:
+        return int(release.rsplit("_v", 1)[1])
+    except ValueError:
+        raise ValueError(f"release must be 'release_vN'; got {release!r}")
+
+
 def _release_filename(release: str) -> str:
     """``release_vN`` -> ``testN.jsonl`` (``release_v1`` -> ``test.jsonl``)."""
-    n = int(release.rsplit("_v", 1)[1])
+    n = _release_num(release)
     return "test.jsonl" if n == 1 else f"test{n}.jsonl"
 
 
@@ -79,10 +95,11 @@ def iter_release_rows(release: str = "release_v6", max_tests: Optional[int] = No
     Each ``testN.jsonl`` is the incremental window for vN. ``cumulative=True`` (official
     version_tag semantics) loads ``test.jsonl``..``testN.jsonl`` de-duped by question_id
     (release_v6 == ~1055 problems); ``cumulative=False`` loads only that window.
-    """
-    from huggingface_hub import hf_hub_download
 
-    n = int(release.rsplit("_v", 1)[1])
+    Dedup keeps the FIRST occurrence of a question_id (windows iterate v1..vN
+    ascending), so each row's ``release`` field means "release it first appeared in".
+    """
+    n = _release_num(release)
     tags = [f"release_v{i}" for i in range(1, n + 1)] if cumulative else [release]
     seen = set()
     for tag in tags:
