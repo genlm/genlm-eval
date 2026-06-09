@@ -26,9 +26,13 @@ def check_correctness(sample: Dict[str, str], generation: str,
 
     ``results`` is per-test ``True``/``False`` (or sentinel ints ``-1``/``-2``/``-4``
     on failure)."""
-    if not sample or "input_output" not in sample:
-        return [-1], {"error": "missing eval_sample"}
-    n_tests = len(json.loads(sample["input_output"])["inputs"])
+    # Guard the input_output parse (official lcb_runner does this unguarded, but our
+    # from_jsonl allows prompts-only snapshots where it may be absent/malformed): a bad
+    # sample scores fail instead of crashing the whole eval run.
+    try:
+        n_tests = len(json.loads(sample["input_output"])["inputs"])
+    except (KeyError, TypeError, ValueError):
+        return [-1], {"error": "missing or malformed eval_sample"}
     run_timeout = max(1, int(timeout))  # signal.alarm needs an int
     # context manager shuts down the Manager's server process (else one leaks per call)
     with multiprocessing.Manager() as manager:

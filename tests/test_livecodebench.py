@@ -1,9 +1,3 @@
-"""Tests for the LiveCodeBench domain.
-
-Offline: uses the committed fixtures tests/fixtures/lcb_sample.jsonl +
-tests/fixtures/lcb_solutions.py (no GPU/network). The harness forks a child per
-problem and runs real subprocess code execution, so these are CPU-only but slowish.
-"""
 import base64
 import importlib.util
 import json
@@ -13,13 +7,10 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("genlm.control")  # domain __init__ imports the runtime potential
-
-from genlm.eval.domains.livecodebench import (  # noqa: E402
+from genlm.eval.domains.livecodebench import (
     LiveCodeBenchDataset,
     LiveCodeBenchEvaluator,
     LiveCodeBenchInstance,
-    LiveCodeBenchRuntimeNoErrorPotential,
     format_lcb_prompt,
     extract_code,
     check_correctness,
@@ -107,6 +98,13 @@ def test_stdin_wrong_fails():
     assert passed_all(STDIN_SAMPLE, STDIN_BAD, timeout=6.0) is False
 
 
+def test_malformed_eval_sample_fails_gracefully():
+    # prompts-only / malformed snapshots must score fail, not crash the eval run
+    for bad in ({}, {"input_output": "{}"}, {"input_output": "not json"}):
+        assert passed_all(bad, STDIN_GOOD, timeout=6.0) is False
+        assert check_correctness(bad, STDIN_GOOD, timeout=6.0)[0] == [-1]
+
+
 def test_functional_correct_passes():
     assert passed_all(FUNC_SAMPLE, FUNC_GOOD, timeout=6.0) is True
 
@@ -139,46 +137,6 @@ def test_evaluator_scores_correct_generation_one():
 def test_evaluator_scores_wrong_generation_zero():
     ev = LiveCodeBenchEvaluator(timeout_seconds=6.0)
     assert ev.evaluate_sample(_instance(STDIN_SAMPLE), BAD_GEN).score == 0.0
-
-
-from genlm.control.constant import EndOfSequence  # noqa: E402
-
-VOCAB = [bytes([b]) for b in range(256)]
-
-
-def _ctx(text: str):
-    return [bytes([b]) for b in text.encode("utf-8")] + [EndOfSequence()]
-
-
-# Runtime potential: 0.0 if the program runs on every test (right OR wrong answer),
-# -inf if it fails to compile / raises / times out. RUNTIME_WRONG runs but prints the
-# wrong answer (still 0.0); RUNTIME_SYNTAX has a syntax error (never compiles -> -inf).
-RUNTIME_WRONG_GEN = "```python\nimport sys\nn = int(sys.stdin.readline())\nprint(n + 1)\n```"
-RUNTIME_SYNTAX_GEN = "```python\ndef f(:\n    return 1\n```"
-
-
-@pytest.mark.asyncio
-async def test_runtime_potential_runs_but_wrong_returns_zero():
-    pot = LiveCodeBenchRuntimeNoErrorPotential(VOCAB, STDIN_SAMPLE, timeout_seconds=6.0)
-    assert await pot.complete(_ctx(RUNTIME_WRONG_GEN)) == 0.0
-
-
-@pytest.mark.asyncio
-async def test_runtime_potential_syntax_error_returns_neg_inf():
-    pot = LiveCodeBenchRuntimeNoErrorPotential(VOCAB, STDIN_SAMPLE, timeout_seconds=6.0)
-    assert await pot.complete(_ctx(RUNTIME_SYNTAX_GEN)) == float("-inf")
-
-
-@pytest.mark.asyncio
-async def test_runtime_potential_empty_code_returns_neg_inf():
-    pot = LiveCodeBenchRuntimeNoErrorPotential(VOCAB, STDIN_SAMPLE, timeout_seconds=6.0)
-    assert await pot.complete(_ctx("no code fence here")) == float("-inf")
-
-
-@pytest.mark.asyncio
-async def test_runtime_potential_prefix_is_zero():
-    pot = LiveCodeBenchRuntimeNoErrorPotential(VOCAB, STDIN_SAMPLE, timeout_seconds=6.0)
-    assert await pot.prefix(_ctx(RUNTIME_WRONG_GEN)) == 0.0
 
 
 class _FakeTok:
