@@ -1,10 +1,6 @@
-"""LCB prompt formatting + code extraction, as in the official ``lcb_runner``.
-
-Prompt assembly and ``extract_code`` are kept identical to ``lcb_runner`` (generic /
-CodeQwen styles) so numbers are leaderboard-comparable. The only deviation: for
-base models the non-chat path is zero-shot (lcb_runner few-shots them); the chat
-path is exact.
-"""
+"""Prompt formatting + code extraction kept identical to the official ``lcb_runner``
+so numbers are leaderboard-comparable. Only deviation: the non-chat path is
+zero-shot (lcb_runner few-shots base models); the chat path is exact."""
 from __future__ import annotations
 
 from typing import Mapping
@@ -18,7 +14,8 @@ SYSTEM_MESSAGE = (
 SYSTEM_MESSAGE_CODEQWEN = (
     "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user"
 )
-DEFAULT_STOP = ["###"]  # lcb_runner default --stop
+DEFAULT_STOP = ["###"]  # lcb_runner default --stop; apply at decode time (see cookbook)
+STYLES = ("generic", "codeqwen")
 
 # Verbatim from lcb_runner PromptConstants.
 _FORMATTING_WITH_STARTER = (
@@ -64,6 +61,8 @@ def format_lcb_prompt(row: Mapping[str, str], tokenizer=None,
                       chat_template: bool = False, style: str = "generic") -> str:
     """Prompt for an lcb_runner LMStyle: "generic" (LLaMa3, via chat template when
     chat_template=True) or "codeqwen" (CodeQwenInstruct, raw <|im_*|> string)."""
+    if style not in STYLES:
+        raise ValueError(f"style must be one of {STYLES}; got {style!r}")
     qc, sc = row.get("question_content", ""), row.get("starter_code", "") or ""
     if style == "codeqwen":
         # official joins system + body with a blank line ("...<|im_start|>user\n\n...")

@@ -1,19 +1,15 @@
 """Load + decode LiveCodeBench ``code_generation_lite`` releases.
 
-Downloads a release's ``testN.jsonl`` via ``huggingface_hub`` (the ``datasets``
-builder hits a pyarrow offset-overflow on the large ``private_test_cases`` column),
-decodes the private tests, and emits a harness-ready ``eval_sample`` per problem.
-``iter_release_rows`` feeds ``LiveCodeBenchDataset.from_hf``.
-"""
+Downloads raw ``testN.jsonl`` via ``huggingface_hub`` — the ``datasets`` builder
+hits a pyarrow offset-overflow on the large ``private_test_cases`` column."""
 from __future__ import annotations
 
 import base64
 import json
 import pickle
+import re
 import zlib
-from typing import Any, Dict, Iterator, List, Mapping, Optional
-
-from huggingface_hub import hf_hub_download
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional
 
 # HF Lite variant: https://huggingface.co/datasets/livecodebench/code_generation_lite
 HF_REPO = "livecodebench/code_generation_lite"
@@ -70,13 +66,11 @@ def build_row(raw: Mapping[str, Any], release: str, max_tests: Optional[int] = N
 
 
 def _release_num(release: str) -> int:
-    """``release_vN`` -> ``N``; raises on anything but that shape."""
-    if "_v" not in release:
-        raise ValueError(f"release must be 'release_vN'; got {release!r}")
-    try:
-        return int(release.rsplit("_v", 1)[1])
-    except ValueError:
-        raise ValueError(f"release must be 'release_vN'; got {release!r}")
+    """``release_vN`` -> ``N`` (N >= 1); raises on anything but that shape."""
+    m = re.fullmatch(r"release_v([1-9]\d*)", release)
+    if not m:
+        raise ValueError(f"release must be 'release_vN' with N >= 1; got {release!r}")
+    return int(m.group(1))
 
 
 def _release_filename(release: str) -> str:
@@ -86,13 +80,19 @@ def _release_filename(release: str) -> str:
 
 
 def iter_release_rows(release: str = "release_v6", max_tests: Optional[int] = None,
-                      cache_dir: Optional[str] = None, cumulative: bool = True
+                      cache_dir: Optional[str] = None, cumulative: bool = True,
+                      raw_filter: Optional[Callable[[Mapping[str, Any]], bool]] = None,
                       ) -> Iterator[Dict[str, Any]]:
     """Yield clean built rows for a release (needs HF cache).
 
     ``cumulative=True`` (official version_tag semantics) loads test.jsonl..testN.jsonl
     de-duped by question_id (release_v6 == ~1055); ``cumulative=False`` loads only that
-    window. Dedup keeps the first occurrence, so ``release`` = first-seen."""
+    window. Dedup keeps the first occurrence, so ``release`` = first-seen.
+
+    ``raw_filter`` is applied to the raw HF row BEFORE the (expensive) private-test
+    decode, so callers can drop e.g. out-of-window rows cheaply."""
+    from huggingface_hub import hf_hub_download  # lazy: only from_hf needs the extra
+
     n = _release_num(release)
     tags = [f"release_v{i}" for i in range(1, n + 1)] if cumulative else [release]
     seen = set()
@@ -103,9 +103,11 @@ def iter_release_rows(release: str = "release_v6", max_tests: Optional[int] = No
             for line in fin:
                 if not line.strip():
                     continue
-                row = build_row(json.loads(line), release=tag, max_tests=max_tests)
-                qid = row["question_id"]
-                if qid in seen:
+                raw = json.loads(line)
+                if raw.get("question_id") in seen:
                     continue
-                seen.add(qid)
+                if raw_filter is not None and not raw_filter(raw):
+                    continue
+                row = build_row(raw, release=tag, max_tests=max_tests)
+                seen.add(row["question_id"])
                 yield row

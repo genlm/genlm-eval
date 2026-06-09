@@ -96,5 +96,5 @@ docs = [
 include = ["genlm", "genlm/eval"]
 
 [tool.ruff]
-# testing_util.py is vendored verbatim from upstream LiveCodeBench; don't lint it.
-extend-exclude = ["genlm/eval/domains/livecodebench/util/testing_util.py"]
+# vendored/ holds verbatim upstream LiveCodeBench code; don't lint it.
+extend-exclude = ["genlm/eval/domains/livecodebench/vendored/"]

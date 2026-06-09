@@ -1,11 +1,11 @@
 import base64
-import importlib.util
 import json
 import pickle
 import zlib
 from pathlib import Path
 
 import pytest
+from fixtures.lcb_solutions import SOLUTIONS, WRONG
 
 from genlm.eval.domains.livecodebench import (
     LiveCodeBenchDataset,
@@ -17,17 +17,12 @@ from genlm.eval.domains.livecodebench import (
     passed_all,
     build_row,
     derive_testtype,
+    iter_release_rows,
 )
+from genlm.eval.domains.livecodebench.fetch import _release_num
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 SAMPLE = FIXTURE_DIR / "lcb_sample.jsonl"
-
-
-def _load_solutions():
-    spec = importlib.util.spec_from_file_location("lcb_solutions", FIXTURE_DIR / "lcb_solutions.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.SOLUTIONS, mod.WRONG
 
 
 # ------------------------------ prompts ------------------------------ #
@@ -53,6 +48,11 @@ def test_codeqwen_prompt_has_blank_line_after_user_marker():
     assert p.rstrip().endswith("<|im_start|>assistant")
 
 
+def test_unknown_style_raises():
+    with pytest.raises(ValueError, match="style"):
+        format_lcb_prompt({"question_content": "x", "starter_code": ""}, style="qwen")
+
+
 def test_extract_last_fenced_block():
     out = "thinking...\n```python\nprint(1)\n```\nmore\n```python\nprint(2)\n```\n"
     assert extract_code(out).strip() == "print(2)"
@@ -76,7 +76,7 @@ def test_extract_with_three_plus_fences_returns_last_block():
 # ------------------------------ harness ------------------------------ #
 
 def test_vendored_run_test_importable():
-    from genlm.eval.domains.livecodebench.util.testing_util import run_test
+    from genlm.eval.domains.livecodebench.vendored.testing_util import run_test
     assert callable(run_test)
 
 
@@ -118,6 +118,18 @@ def test_check_correctness_returns_per_test_list():
     assert len(results) == 2 and all(r == 1 for r in results)
 
 
+SLEEPY_SAMPLE = {"input_output": json.dumps(
+    {"inputs": ["3\n"], "outputs": ["6\n"], "fn_name": None})}
+SLEEPY_GOOD = ("import sys, time\ntime.sleep(1.2)\n"
+               "n = int(sys.stdin.readline())\nprint(n * 2)\n")
+
+
+def test_fractional_timeout_rounds_up_not_down():
+    # timeout=1.5 must give the child at least 2s (ceil), not 1s (int truncation):
+    # a correct solution needing 1.2s would otherwise be graded TLE.
+    assert passed_all(SLEEPY_SAMPLE, SLEEPY_GOOD, timeout=1.5) is True
+
+
 # --------------------------- evaluator / critic --------------------------- #
 
 GOOD_GEN = "Here is my solution:\n```python\nimport sys\nn=int(sys.stdin.readline())\nprint(n*2)\n```\n"
@@ -125,8 +137,7 @@ BAD_GEN = "```python\nimport sys\nn=int(sys.stdin.readline())\nprint(n+1)\n```"
 
 
 def _instance(eval_sample, qid="t"):
-    return LiveCodeBenchInstance(instance_id=qid, question_id=qid,
-                                 question_content="x", eval_sample=eval_sample)
+    return LiveCodeBenchInstance(instance_id=qid, question_content="x", eval_sample=eval_sample)
 
 
 def test_evaluator_scores_correct_generation_one():
@@ -137,6 +148,19 @@ def test_evaluator_scores_correct_generation_one():
 def test_evaluator_scores_wrong_generation_zero():
     ev = LiveCodeBenchEvaluator(timeout_seconds=6.0)
     assert ev.evaluate_sample(_instance(STDIN_SAMPLE), BAD_GEN).score == 0.0
+
+
+def test_evaluator_memoizes_identical_generations(monkeypatch):
+    import genlm.eval.domains.livecodebench.livecodebench as lcb_mod
+    calls = []
+    real = lcb_mod.passed_all
+    monkeypatch.setattr(lcb_mod, "passed_all",
+                        lambda *a, **kw: calls.append(1) or real(*a, **kw))
+    ev = LiveCodeBenchEvaluator(timeout_seconds=6.0)
+    inst = _instance(STDIN_SAMPLE)
+    for _ in range(3):  # identical particles must hit the harness only once
+        assert ev.evaluate_sample(inst, GOOD_GEN).score == 1.0
+    assert len(calls) == 1
 
 
 class _FakeTok:
@@ -153,8 +177,8 @@ class _FakeTok:
 
 def test_prompt_formatter_avoids_double_bos_on_chat_path():
     from genlm.eval.domains.livecodebench import default_prompt_formatter as fmt
-    inst = LiveCodeBenchInstance(instance_id="x", question_id="x",
-                                 question_content="q", eval_sample={"input_output": "{}"})
+    inst = LiveCodeBenchInstance(instance_id="x", question_content="q",
+                                 eval_sample={"input_output": "{}"})
     tok = _FakeTok()
     fmt(tok, inst, use_chat_format=True)
     assert tok.last_add_special is False    # chat template already added BOS
@@ -207,7 +231,25 @@ def test_derive_testtype_uses_func_name():
     assert derive_testtype({}, [{"testtype": "stdin"}]) == "stdin"
 
 
-# ------------------------------ dataset / split ------------------------------ #
+def test_release_num_strict():
+    assert _release_num("release_v1") == 1
+    assert _release_num("release_v12") == 12
+    for bad in ("release_v-1", "release_v0", "release_v1_2", "v6", "release_v", "release_v 2"):
+        with pytest.raises(ValueError):
+            _release_num(bad)
+
+
+def test_iter_release_rows_raw_filter_skips_rows(tmp_path, monkeypatch):
+    raw_file = tmp_path / "test.jsonl"
+    raw_file.write_text(json.dumps(_functional_raw()) + "\n"           # 2023 row
+                        + json.dumps(_stdin_raw_compressed()) + "\n")  # 2024 row
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", lambda **kw: str(raw_file))
+    rows = list(iter_release_rows("release_v1",
+                                  raw_filter=lambda r: r["contest_date"] >= "2024"))
+    assert [r["question_id"] for r in rows] == ["q-stdin-1"]
+
+
+# ------------------------------ dataset / holdout ------------------------------ #
 
 def _write_snapshot(tmp_path: Path) -> Path:
     rows = []
@@ -230,39 +272,47 @@ def _write_snapshot(tmp_path: Path) -> Path:
 
 
 def _ids(ds):
-    return [inst.question_id for inst in ds]
+    return [inst.instance_id for inst in ds]
 
 
-def test_split_is_disjoint_and_covers_all(tmp_path):
+def test_holdout_is_disjoint_and_covers_all(tmp_path):
     snap = _write_snapshot(tmp_path)
-    train = set(_ids(LiveCodeBenchDataset.from_jsonl(snap, split="train", test_frac=0.3, seed=7)))
-    test = set(_ids(LiveCodeBenchDataset.from_jsonl(snap, split="test", test_frac=0.3, seed=7)))
+    train = set(_ids(LiveCodeBenchDataset.from_jsonl(snap, holdout="train", test_frac=0.3, seed=7)))
+    test = set(_ids(LiveCodeBenchDataset.from_jsonl(snap, holdout="test", test_frac=0.3, seed=7)))
     assert train.isdisjoint(test)
     assert train | test == {f"f{i}" for i in range(10)} | {f"s{i}" for i in range(10)}
 
 
-def test_split_is_seed_stable(tmp_path):
+def test_holdout_is_seed_stable(tmp_path):
     snap = _write_snapshot(tmp_path)
-    a = _ids(LiveCodeBenchDataset.from_jsonl(snap, split="train", seed=7))
-    b = _ids(LiveCodeBenchDataset.from_jsonl(snap, split="train", seed=7))
+    a = _ids(LiveCodeBenchDataset.from_jsonl(snap, holdout="train", seed=7))
+    b = _ids(LiveCodeBenchDataset.from_jsonl(snap, holdout="train", seed=7))
     assert a == b
 
 
-def test_split_stratifies_testtype(tmp_path):
+def test_holdout_stratifies_testtype(tmp_path):
     snap = _write_snapshot(tmp_path)
-    tts = [i.testtype for i in LiveCodeBenchDataset.from_jsonl(snap, split="test", test_frac=0.3, seed=7)]
+    tts = [i.testtype for i in LiveCodeBenchDataset.from_jsonl(snap, holdout="test", test_frac=0.3, seed=7)]
     assert tts.count("functional") == 3 and tts.count("stdin") == 3
+
+
+def test_invalid_holdout_raises_even_on_empty_data(tmp_path):
+    snap = _write_snapshot(tmp_path)
+    with pytest.raises(ValueError, match="holdout"):
+        LiveCodeBenchDataset.from_jsonl(snap, holdout="vali")
+    with pytest.raises(ValueError, match="holdout"):  # must not depend on rows surviving filters
+        LiveCodeBenchDataset.from_jsonl(snap, holdout="vali", start_date="2999-01-01")
 
 
 def test_difficulties_filter(tmp_path):
     snap = _write_snapshot(tmp_path)
-    ds = LiveCodeBenchDataset.from_jsonl(snap, split="train", difficulties=["easy"])
+    ds = LiveCodeBenchDataset.from_jsonl(snap, holdout="train", difficulties=["easy"])
     assert {i.difficulty for i in ds} == {"easy"}
 
 
-def test_full_window_has_no_split(tmp_path):
+def test_full_window_has_no_holdout(tmp_path):
     snap = _write_snapshot(tmp_path)
-    assert len(LiveCodeBenchDataset.from_jsonl(snap)) == 20  # split=None -> all rows
+    assert len(LiveCodeBenchDataset.from_jsonl(snap)) == 20  # holdout=None -> all rows
 
 
 def test_date_window_filter(tmp_path):
@@ -284,9 +334,36 @@ def test_end_date_excludes_timed_contest_on_boundary_day(tmp_path):
     assert len(list(LiveCodeBenchDataset.from_jsonl(p, end_date="2024-08-18"))) == 1
 
 
+def test_timezone_aware_contest_date_does_not_crash(tmp_path):
+    row = {"question_id": "tz", "question_content": "x", "starter_code": "",
+           "difficulty": "easy", "platform": "p", "contest_date": "2024-08-17T19:30:00+00:00",
+           "testtype": "stdin", "eval_sample": {"input_output": "{}"}}
+    p = tmp_path / "s.jsonl"
+    p.write_text(json.dumps(row) + "\n")
+    assert len(list(LiveCodeBenchDataset.from_jsonl(p, end_date="2024-08-18"))) == 1
+    assert len(list(LiveCodeBenchDataset.from_jsonl(p, end_date="2024-08-17"))) == 0
+
+
 def test_max_instances_caps(tmp_path):
     snap = _write_snapshot(tmp_path)
-    assert len(LiveCodeBenchDataset.from_jsonl(snap, split="train", max_instances=5)) == 5
+    assert len(LiveCodeBenchDataset.from_jsonl(snap, holdout="train", max_instances=5)) == 5
+
+
+def test_shuffle_is_seeded_permutation(tmp_path):
+    snap = _write_snapshot(tmp_path)
+    plain = _ids(LiveCodeBenchDataset.from_jsonl(snap))
+    shuffled = _ids(LiveCodeBenchDataset.from_jsonl(snap, shuffle=True, seed=1))
+    assert sorted(plain) == sorted(shuffled) and plain != shuffled
+    assert shuffled == _ids(LiveCodeBenchDataset.from_jsonl(snap, shuffle=True, seed=1))
+
+
+def test_to_jsonl_roundtrip(tmp_path):
+    snap = _write_snapshot(tmp_path)
+    ds = LiveCodeBenchDataset.from_jsonl(snap, start_date="2024-01-01")
+    out = tmp_path / "out.jsonl"
+    ds.to_jsonl(out)
+    again = LiveCodeBenchDataset.from_jsonl(out)
+    assert _ids(again) == _ids(ds)  # snapshot inherits the window; reload is identity
 
 
 # ------------------------------ committed fixture ------------------------------ #
@@ -303,16 +380,14 @@ def test_fixture_spans_both_testtypes_and_releases():
 @pytest.mark.skipif(not _ROWS, reason="fixture missing")
 @pytest.mark.parametrize("row", _ROWS, ids=lambda r: r["question_id"])
 def test_reference_solution_passes(row):
-    sols, _ = _load_solutions()
     ev = LiveCodeBenchEvaluator(timeout_seconds=10.0)
     inst = _instance(row["eval_sample"], qid=row["question_id"])
-    assert ev.evaluate_sample(inst, sols[row["question_id"]]).score == 1.0
+    assert ev.evaluate_sample(inst, SOLUTIONS[row["question_id"]]).score == 1.0
 
 
 @pytest.mark.skipif(not _ROWS, reason="fixture missing")
 @pytest.mark.parametrize("row", _ROWS, ids=lambda r: r["question_id"])
 def test_wrong_solution_fails(row):
-    _, wrong = _load_solutions()
     ev = LiveCodeBenchEvaluator(timeout_seconds=10.0)
     inst = _instance(row["eval_sample"], qid=row["question_id"])
-    assert ev.evaluate_sample(inst, wrong).score == 0.0
+    assert ev.evaluate_sample(inst, WRONG).score == 0.0
