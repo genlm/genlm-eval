@@ -1,14 +1,8 @@
-"""LiveCodeBench runtime potential (mirrors DS1000RuntimeNoErrorPotential).
+"""Runtime no-error potential for LiveCodeBench (mirrors DS1000RuntimeNoErrorPotential).
 
-A *runtime* (not correctness) signal for SMC: execute the extracted program on a test
-input and return 0.0 if it runs without raising, -inf otherwise. It uses the test
-INPUT only, never the gold output — a program that runs but prints the wrong answer
-scores 0.0; only code that fails to compile, raises, or times out is pruned. Whether
-the output is correct is checked solely in the Evaluator (not used as a constraint).
-
-The input is fed on stdin (stdin problems read it; functional problems ignore it and
-just define their class). Reaching end-of-input (``EOFError``) or ``SystemExit`` both
-count as a clean run.
+Runs a generation on a test input; 0.0 if it executes without raising, -inf otherwise.
+Uses the input only (never the gold output), so wrong answers still score 0.0 — only
+broken code is pruned. Correctness is the Evaluator's job.
 """
 from __future__ import annotations
 
@@ -43,12 +37,9 @@ class LiveCodeBenchRuntimeNoErrorPotential(Potential):
         self.timeout_seconds = float(timeout_seconds)
         self.python_executable = python_executable or sys.executable
         self.f = f
-        # The first test input, used only to keep stdin programs from crashing on
-        # empty input. None when no eval_sample was supplied.
-        self._stdin = self._first_input(eval_sample or {})
-        # SMC clones particles into repeated prefixes; cache exact code strings to
-        # avoid launching duplicate subprocess checks (per-instance, fixed input).
+        self._stdin = self._first_input(eval_sample or {})  # keeps stdin programs from crashing
         self._eval_sample = dict(eval_sample or {})
+        # cache exact code strings (SMC clones particles into repeated prefixes)
         self._score_cache: "OrderedDict[str, float]" = OrderedDict()
         self._score_cache_maxsize = 4096
         self.cache_hits = 0

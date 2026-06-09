@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import random
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Type
 
@@ -43,11 +44,9 @@ class LiveCodeBenchInstance(Instance):
 
 
 def _stratified_split(rows: List[dict], split: str, test_frac: float, seed: int) -> List[dict]:
-    """Stratified (testtype, difficulty) train/test split; all rows when split=None.
+    """Stratified (testtype, difficulty) split; all rows when split=None.
 
-    Determinism is conditional on stable upstream row order (from_hf builds rows in
-    release/file order), since the per-key shuffle seeds off that order.
-    """
+    Deterministic given a fixed seed and stable upstream row order."""
     if split is None:
         return rows
     by_key: Dict[Any, list] = {}
@@ -73,15 +72,23 @@ def _filter_rows(rows: Iterable[dict], start_date: Optional[str], end_date: Opti
                  difficulties: Optional[Sequence[str]], testtypes: Optional[Sequence[str]]) -> List[dict]:
     diff_set = {d.lower() for d in difficulties} if difficulties else None
     tt_set = {t.lower() for t in testtypes} if testtypes else None
+    # Match official lcb_runner: compare contest_date as a datetime against the window
+    # bounds (YYYY-MM-DD = midnight), inclusive on both ends. So a timed contest on the
+    # end_date day (e.g. ...T19:30:00) is EXCLUDED, as upstream. Undated/unparseable
+    # rows are dropped whenever a window is set.
+    start_dt = datetime.fromisoformat(start_date) if start_date else None
+    end_dt = datetime.fromisoformat(end_date) if end_date else None
     out = []
     for r in rows:
-        # contest_date is ISO-8601, so the YYYY-MM-DD prefix sorts lexically; undated
-        # rows (empty contest_date) are dropped whenever a date window is set.
-        d = (r.get("contest_date") or "")[:10]
-        if start_date and (not d or d < start_date):
-            continue
-        if end_date and (not d or d > end_date):
-            continue
+        if start_dt or end_dt:
+            try:
+                cd = datetime.fromisoformat(str(r.get("contest_date") or ""))
+            except ValueError:
+                continue
+            if start_dt and cd < start_dt:
+                continue
+            if end_dt and cd > end_dt:
+                continue
         if diff_set is not None and str(r.get("difficulty", "")).lower() not in diff_set:
             continue
         if tt_set is not None and str(r.get("testtype", "")).lower() not in tt_set:

@@ -62,15 +62,12 @@ def _codeqwen_body(question_content: str, starter_code: str) -> str:
 
 def format_lcb_prompt(row: Mapping[str, str], tokenizer=None,
                       chat_template: bool = False, style: str = "generic") -> str:
-    """Full prompt string from a snapshot row, matching an lcb_runner LMStyle.
-
-    style="generic" (LLaMa3 etc.): SYSTEM_MESSAGE + ### Question/Format/Answer template,
-    via the model chat template when chat_template=True. style="codeqwen"
-    (CodeQwenInstruct): the model-specific "helpful assistant" + manual <|im_*|> prompt
-    (a raw completion string, no apply_chat_template)."""
+    """Prompt for an lcb_runner LMStyle: "generic" (LLaMa3, via chat template when
+    chat_template=True) or "codeqwen" (CodeQwenInstruct, raw <|im_*|> string)."""
     qc, sc = row.get("question_content", ""), row.get("starter_code", "") or ""
     if style == "codeqwen":
-        return f"{SYSTEM_MESSAGE_CODEQWEN}\n{_codeqwen_body(qc, sc)}"
+        # official joins system + body with a blank line ("...<|im_start|>user\n\n...")
+        return f"{SYSTEM_MESSAGE_CODEQWEN}\n\n{_codeqwen_body(qc, sc)}"
     body = _user_body(qc, sc)
     if chat_template and tokenizer is not None:
         messages = [{"role": "system", "content": SYSTEM_MESSAGE},
@@ -80,11 +77,9 @@ def format_lcb_prompt(row: Mapping[str, str], tokenizer=None,
 
 
 def extract_code(model_output: str) -> str:
-    """Code between the last two ``` fences; "" if there are fewer than two.
+    """Code between the last two ``` fences (last block if 3+); "" if fewer than two.
 
-    Matches lcb_runner extraction_utils.extract_code (generic/chat style). With 3+
-    fence lines it returns the last block (an unterminated final block slices to the
-    last fence)."""
+    Matches lcb_runner extract_code (generic/chat style)."""
     lines = model_output.split("\n")
     fence_idxs = [i for i, ln in enumerate(lines) if "```" in ln]
     if len(fence_idxs) < 2:

@@ -20,11 +20,9 @@ HF_REPO = "livecodebench/code_generation_lite"
 
 
 def _decode_private(field: str) -> List[Dict[str, Any]]:
-    """Plain JSON if possible, else base64 -> zlib -> pickle -> json (LCB chain).
+    """Plain JSON, else base64 -> zlib -> pickle -> json (LCB chain).
 
-    The pickle branch runs ``pickle.loads`` on dataset bytes, so loading a release
-    trusts the dataset publisher (same trust boundary as official lcb_runner).
-    """
+    The pickle branch trusts the dataset publisher (as official lcb_runner does)."""
     try:
         return json.loads(field)
     except Exception:
@@ -90,15 +88,11 @@ def _release_filename(release: str) -> str:
 def iter_release_rows(release: str = "release_v6", max_tests: Optional[int] = None,
                       cache_dir: Optional[str] = None, cumulative: bool = True
                       ) -> Iterator[Dict[str, Any]]:
-    """Yield clean built rows for a ``code_generation_lite`` release (needs HF cache).
+    """Yield clean built rows for a release (needs HF cache).
 
-    Each ``testN.jsonl`` is the incremental window for vN. ``cumulative=True`` (official
-    version_tag semantics) loads ``test.jsonl``..``testN.jsonl`` de-duped by question_id
-    (release_v6 == ~1055 problems); ``cumulative=False`` loads only that window.
-
-    Dedup keeps the FIRST occurrence of a question_id (windows iterate v1..vN
-    ascending), so each row's ``release`` field means "release it first appeared in".
-    """
+    ``cumulative=True`` (official version_tag semantics) loads test.jsonl..testN.jsonl
+    de-duped by question_id (release_v6 == ~1055); ``cumulative=False`` loads only that
+    window. Dedup keeps the first occurrence, so ``release`` = first-seen."""
     n = _release_num(release)
     tags = [f"release_v{i}" for i in range(1, n + 1)] if cumulative else [release]
     seen = set()

@@ -22,19 +22,15 @@ def _temp_run(sample, generation, debug, result, metadata_list, timeout):
 def check_correctness(sample: Dict[str, str], generation: str,
                       timeout: float = 6.0, debug: bool = False
                       ) -> Tuple[List[Any], Dict[str, Any]]:
-    """Run ``generation`` against ``sample['input_output']`` in a forked child.
+    """Run ``generation`` against the tests in a forked child.
 
-    Returns ``(results, metadata)`` where ``results`` is a per-test list of
-    truthy/falsy outcomes (``True``/``False`` per test, or sentinel ints like
-    ``-1``/``-2``/``-4`` on global failure)."""
+    ``results`` is per-test ``True``/``False`` (or sentinel ints ``-1``/``-2``/``-4``
+    on failure)."""
     if not sample or "input_output" not in sample:
         return [-1], {"error": "missing eval_sample"}
     n_tests = len(json.loads(sample["input_output"])["inputs"])
-    # The vendored run_test passes ``timeout`` to ``signal.alarm``, which requires
-    # an int, so coerce here (our callers default to a float like 6.0).
-    run_timeout = max(1, int(timeout))
-    # Manager spawns a server process; the context manager shuts it down so we
-    # don't leak one per call over thousands of completions.
+    run_timeout = max(1, int(timeout))  # signal.alarm needs an int
+    # context manager shuts down the Manager's server process (else one leaks per call)
     with multiprocessing.Manager() as manager:
         result = manager.list()
         metadata_list = manager.list()
@@ -53,10 +49,8 @@ def check_correctness(sample: Dict[str, str], generation: str,
 
 
 def passed_all(sample: Dict[str, str], generation: str, timeout: float = 6.0) -> bool:
-    """Strict 0/1: True iff every test ran and returned exactly pass (``== 1``).
-
-    Sentinels (``-1``/``-2``/``-4``), ``False``, and an empty list all fail."""
+    """True iff every test passed (``> 0``), matching official ``np.all(gen > 0)``."""
     if not sample or "input_output" not in sample:
         return False
     results, _ = check_correctness(sample, generation, timeout=timeout)
-    return bool(results) and all(r == 1 for r in results)
+    return bool(results) and all(r > 0 for r in results)

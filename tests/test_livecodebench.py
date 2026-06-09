@@ -54,6 +54,14 @@ def test_functional_prompt_includes_starter_code():
     assert "class Solution" in p and "starter code" in p.lower()
 
 
+def test_codeqwen_prompt_has_blank_line_after_user_marker():
+    # Official lcb_runner joins SYSTEM_MESSAGE_CODEQWEN + "\n\n" + body, i.e. a blank
+    # line after "<|im_start|>user". A single "\n" here is a real prompt bug for Qwen.
+    p = format_lcb_prompt({"question_content": "Print n*2.", "starter_code": ""}, style="codeqwen")
+    assert "<|im_start|>user\n\nYou will be given" in p
+    assert p.rstrip().endswith("<|im_start|>assistant")
+
+
 def test_extract_last_fenced_block():
     out = "thinking...\n```python\nprint(1)\n```\nmore\n```python\nprint(2)\n```\n"
     assert extract_code(out).strip() == "print(2)"
@@ -303,6 +311,19 @@ def test_date_window_filter(tmp_path):
     snap = _write_snapshot(tmp_path)
     ds = LiveCodeBenchDataset.from_jsonl(snap, start_date="2024-01-01")
     assert {i.testtype for i in ds} == {"stdin"}  # only the 2024 stdin rows survive
+
+
+def test_end_date_excludes_timed_contest_on_boundary_day(tmp_path):
+    # datetime compare (matches official): a contest at 19:30 on the end_date day is
+    # EXCLUDED (end_date parses to midnight); the next day includes it.
+    row = {"question_id": "a", "question_content": "x", "starter_code": "",
+           "difficulty": "easy", "platform": "p", "contest_date": "2024-08-17T19:30:00",
+           "testtype": "stdin", "release": "release_v4",
+           "eval_sample": {"input_output": "{}"}, "metadata": {}}
+    p = tmp_path / "s.jsonl"
+    p.write_text(json.dumps(row) + "\n")
+    assert len(list(LiveCodeBenchDataset.from_jsonl(p, end_date="2024-08-17"))) == 0
+    assert len(list(LiveCodeBenchDataset.from_jsonl(p, end_date="2024-08-18"))) == 1
 
 
 def test_max_instances_caps(tmp_path):
