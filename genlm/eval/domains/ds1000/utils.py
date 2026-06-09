@@ -30,5 +30,4 @@ def _postprocess_code(t: str) -> str:
     t = t.replace("```python", "")
     t = t.split("```")[0]
     t = t.split("\nEND SOLUTION")[0]
-    t = t.replace("<code>", "")
-    return t.strip()
+    return t.replace("<code>", "")

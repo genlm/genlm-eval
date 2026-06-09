@@ -121,7 +121,7 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
     
     def evaluate_sample(self, instance: DS1000Instance, response: str) -> EvaluationResult:
         solution = _postprocess_code(response)
-        if not solution:
+        if not solution.strip():
             return EvaluationResult(score=0.0, desc="empty solution", metadata=instance.metadata)
 
         script = self._build_harness_script(instance.code_context, solution)
@@ -164,6 +164,19 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
             print("{self.marker_fail}", repr(e), flush=True)
             traceback.print_exc()
             sys.exit(2)
+
+        # Runs test_string when the problem defines it; both checks must pass.
+        test_string = g.get("test_string")
+        if "test_string(" in code_context and callable(test_string):
+            try:
+                _rs = test_string(solution)
+                if _rs is False:
+                    print("{self.marker_fail} TEST_STRING_RETURNED_FALSE", flush=True)
+                    sys.exit(4)
+            except Exception as e:
+                print("{self.marker_fail}", repr(e), flush=True)
+                traceback.print_exc()
+                sys.exit(2)
 
         print("{self.marker_pass}", flush=True)
         sys.exit(0)
