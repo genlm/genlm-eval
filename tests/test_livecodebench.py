@@ -7,10 +7,12 @@ from pathlib import Path
 import pytest
 from fixtures.lcb_solutions import SOLUTIONS, WRONG
 
+import genlm.eval.domains.livecodebench.livecodebench as lcb_mod
 from genlm.eval.domains.livecodebench import (
     LiveCodeBenchDataset,
     LiveCodeBenchEvaluator,
     LiveCodeBenchInstance,
+    default_prompt_formatter,
     format_lcb_prompt,
     extract_code,
     check_correctness,
@@ -20,6 +22,7 @@ from genlm.eval.domains.livecodebench import (
     iter_release_rows,
 )
 from genlm.eval.domains.livecodebench.fetch import _release_num
+from genlm.eval.domains.livecodebench.prompts import SYSTEM_MESSAGE_DEEPSEEK
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 SAMPLE = FIXTURE_DIR / "lcb_sample.jsonl"
@@ -46,6 +49,14 @@ def test_codeqwen_prompt_has_blank_line_after_user_marker():
     p = format_lcb_prompt({"question_content": "Print n*2.", "starter_code": ""}, style="codeqwen")
     assert "<|im_start|>user\n\nYou will be given" in p
     assert p.rstrip().endswith("<|im_start|>assistant")
+
+
+def test_deepseek_prompt_structure():
+    # deepseek fidelity, like the codeqwen check: system message + section markers + trailing
+    # generation cue, guarding the \n\n-join class of bug found for Qwen.
+    p = format_lcb_prompt({"question_content": "Print n*2.", "starter_code": ""}, style="deepseek")
+    assert p.startswith(f"{SYSTEM_MESSAGE_DEEPSEEK}\n\n### Instruction:")
+    assert p.rstrip().endswith("### Response:")
 
 
 def test_unknown_style_raises():
@@ -127,7 +138,6 @@ def test_evaluator_scores(gen, expected):
 
 
 def test_evaluator_memoizes_identical_generations(monkeypatch):
-    import genlm.eval.domains.livecodebench.livecodebench as lcb_mod
     calls = []
     real = lcb_mod.passed_all
     monkeypatch.setattr(lcb_mod, "passed_all",
@@ -152,13 +162,12 @@ class _FakeTok:
 
 
 def test_prompt_formatter_avoids_double_bos_on_chat_path():
-    from genlm.eval.domains.livecodebench import default_prompt_formatter as fmt
     inst = LiveCodeBenchInstance(instance_id="x", question_content="q",
                                  eval_sample={"input_output": "{}"})
     tok = _FakeTok()
-    fmt(tok, inst, use_chat_format=True)
+    default_prompt_formatter(tok, inst, use_chat_format=True)
     assert tok.last_add_special is False    # chat template already added BOS
-    fmt(tok, inst, use_chat_format=False)
+    default_prompt_formatter(tok, inst, use_chat_format=False)
     assert tok.last_add_special is True     # base path must add BOS
 
 

@@ -10,7 +10,7 @@ from genlm.eval.core import Dataset, EvaluationResult, Evaluator, Instance
 
 from genlm.eval.domains.livecodebench.harness import passed_all
 from genlm.eval.domains.livecodebench.fetch import iter_release_rows
-from genlm.eval.domains.livecodebench.prompts import extract_code, format_lcb_prompt
+from genlm.eval.domains.livecodebench.prompts import RAW_STYLES, extract_code, format_lcb_prompt
 
 
 class LiveCodeBenchInstance(Instance):
@@ -251,7 +251,7 @@ def default_prompt_formatter(tokenizer, instance: LiveCodeBenchInstance,
     style="codeqwen" = CodeQwenInstruct style (raw <|im_*|> completion string)."""
     row = {"question_content": instance.question_content, "starter_code": instance.starter_code}
     text = format_lcb_prompt(row, tokenizer=tokenizer, chat_template=use_chat_format, style=style)
-    if style in ("codeqwen", "deepseek"):
+    if style in RAW_STYLES:
         return tokenizer.encode(text)  # raw completion string; vLLM-default specials
     # Chat template already includes the BOS; avoid a second one on re-encode.
     return tokenizer.encode(text, add_special_tokens=not use_chat_format)
