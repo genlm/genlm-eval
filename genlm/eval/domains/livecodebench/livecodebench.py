@@ -210,10 +210,11 @@ class LiveCodeBenchEvaluator(Evaluator[LiveCodeBenchInstance]):
     ``check_correctness``."""
 
     def __init__(self, timeout_seconds: float = 6.0, max_log_chars: int = 4000,
-                 max_total_seconds: Optional[float] = None):
+                 max_total_seconds: Optional[float] = None, extraction_style: str = "generic"):
         self.timeout_seconds = float(timeout_seconds)
         self.max_log_chars = int(max_log_chars)
         self.max_total_seconds = max_total_seconds
+        self.extraction_style = extraction_style  # "genericbase" for base-model generations
         self._cache: Dict[Tuple[Any, str], bool] = {}
 
     def _passed(self, instance: LiveCodeBenchInstance, code: str) -> bool:
@@ -225,7 +226,7 @@ class LiveCodeBenchEvaluator(Evaluator[LiveCodeBenchInstance]):
         return self._cache[key]
 
     def evaluate_sample(self, instance: LiveCodeBenchInstance, response: str) -> EvaluationResult:
-        code = extract_code(response)
+        code = extract_code(response, style=self.extraction_style)
         if not code:
             return EvaluationResult(score=0.0, desc="empty code",
                                     metadata={"question_id": instance.instance_id})
@@ -248,7 +249,8 @@ def default_prompt_formatter(tokenizer, instance: LiveCodeBenchInstance,
     """Build the LCB prompt for ``instance`` and return token ids.
 
     style="generic" + use_chat_format=True = LLaMa3 lcb_runner style (chat template).
-    style="codeqwen" = CodeQwenInstruct style (raw <|im_*|> completion string)."""
+    style="codeqwen"/"deepseek"/"genericbase" = raw completion strings; genericbase
+    needs the matching evaluator extraction_style."""
     row = {"question_content": instance.question_content, "starter_code": instance.starter_code}
     text = format_lcb_prompt(row, tokenizer=tokenizer, chat_template=use_chat_format, style=style)
     if style in RAW_STYLES:

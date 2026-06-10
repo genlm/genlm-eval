@@ -59,6 +59,15 @@ def test_deepseek_prompt_structure():
     assert p.rstrip().endswith("### Response:")
 
 
+def test_genericbase_prompt_structure():
+    # official base protocol: one few-shot example + the real question, no system message
+    p = format_lcb_prompt({"question_content": "Print n*2.", "starter_code": ""}, style="genericbase")
+    assert p.count("### Question\n") == 2 and "Print n*2." in p
+    assert p.endswith("### Answer\n\n") and "expert Python programmer" not in p
+    p2 = format_lcb_prompt({"question_content": "q", "starter_code": "class Solution:"}, style="genericbase")
+    assert p2.count("### Starter Code\n") == 2
+
+
 def test_unknown_style_raises():
     with pytest.raises(ValueError, match="style"):
         format_lcb_prompt({"question_content": "x", "starter_code": ""}, style="qwen")
@@ -135,6 +144,14 @@ def _instance(eval_sample, qid="t"):
 def test_evaluator_scores(gen, expected):
     ev = LiveCodeBenchEvaluator(timeout_seconds=6.0)
     assert ev.evaluate_sample(_instance(STDIN_SAMPLE), gen).score == expected
+
+
+def test_evaluator_genericbase_extraction_scores_raw_output():
+    # unfenced base-model output: genericbase scores the whole output; the fenced default scores 0
+    ev = LiveCodeBenchEvaluator(timeout_seconds=6.0, extraction_style="genericbase")
+    assert ev.evaluate_sample(_instance(STDIN_SAMPLE), STDIN_GOOD).score == 1.0
+    assert LiveCodeBenchEvaluator(timeout_seconds=6.0).evaluate_sample(
+        _instance(STDIN_SAMPLE), STDIN_GOOD).score == 0.0
 
 
 def test_evaluator_memoizes_identical_generations(monkeypatch):
