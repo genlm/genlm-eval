@@ -53,32 +53,18 @@ def test_unknown_style_raises():
         format_lcb_prompt({"question_content": "x", "starter_code": ""}, style="qwen")
 
 
-def test_extract_last_fenced_block():
-    out = "thinking...\n```python\nprint(1)\n```\nmore\n```python\nprint(2)\n```\n"
-    assert extract_code(out).strip() == "print(2)"
-
-
-def test_extract_no_fence_returns_empty():
-    # Official lcb_runner extract_code returns "" when there are <2 fences.
-    assert extract_code("  print(1)  ") == ""
-
-
-def test_extract_handles_bare_fence():
-    assert extract_code("```\nprint(3)\n```").strip() == "print(3)"
-
-
-def test_extract_with_three_plus_fences_returns_last_block():
-    # 3+ fences (prose ``` then a real block): returns the last block, per lcb_runner.
-    out = "see ```inline``` then\n```python\nprint(42)\n```\n"
-    assert extract_code(out).strip() == "print(42)"
+# extract_code mirrors lcb_runner: code between the last two fences, "" if <2 fences.
+@pytest.mark.parametrize("out, expected", [
+    ("thinking...\n```python\nprint(1)\n```\nmore\n```python\nprint(2)\n```\n", "print(2)"),  # last of 2 blocks
+    ("  print(1)  ", ""),                                                 # <2 fences -> ""
+    ("```\nprint(3)\n```", "print(3)"),                                   # bare fence (no language)
+    ("see ```inline``` then\n```python\nprint(42)\n```\n", "print(42)"),  # 3+ fences -> last block
+])
+def test_extract_code(out, expected):
+    assert extract_code(out).strip() == expected
 
 
 # ------------------------------ harness ------------------------------ #
-
-def test_vendored_run_test_importable():
-    from genlm.eval.domains.livecodebench.vendored.testing_util import run_test
-    assert callable(run_test)
-
 
 STDIN_SAMPLE = {"input_output": json.dumps(
     {"inputs": ["3\n", "10\n"], "outputs": ["6\n", "20\n"], "fn_name": None})}
@@ -90,12 +76,14 @@ FUNC_GOOD = "class Solution:\n    def double(self, x):\n        return 2 * x\n"
 FUNC_BAD = "class Solution:\n    def double(self, x):\n        return x + 1\n"
 
 
-def test_stdin_correct_passes():
-    assert passed_all(STDIN_SAMPLE, STDIN_GOOD, timeout=6.0) is True
-
-
-def test_stdin_wrong_fails():
-    assert passed_all(STDIN_SAMPLE, STDIN_BAD, timeout=6.0) is False
+@pytest.mark.parametrize("sample, sol, expected", [
+    (STDIN_SAMPLE, STDIN_GOOD, True),
+    (STDIN_SAMPLE, STDIN_BAD, False),
+    (FUNC_SAMPLE, FUNC_GOOD, True),
+    (FUNC_SAMPLE, FUNC_BAD, False),
+])
+def test_passed_all(sample, sol, expected):
+    assert passed_all(sample, sol, timeout=6.0) is expected
 
 
 def test_malformed_eval_sample_fails_gracefully():
@@ -103,14 +91,6 @@ def test_malformed_eval_sample_fails_gracefully():
     for bad in ({}, {"input_output": "{}"}, {"input_output": "not json"}):
         assert passed_all(bad, STDIN_GOOD, timeout=6.0) is False
         assert check_correctness(bad, STDIN_GOOD, timeout=6.0)[0] == [-1]
-
-
-def test_functional_correct_passes():
-    assert passed_all(FUNC_SAMPLE, FUNC_GOOD, timeout=6.0) is True
-
-
-def test_functional_wrong_fails():
-    assert passed_all(FUNC_SAMPLE, FUNC_BAD, timeout=6.0) is False
 
 
 def test_check_correctness_returns_per_test_list():
@@ -140,14 +120,10 @@ def _instance(eval_sample, qid="t"):
     return LiveCodeBenchInstance(instance_id=qid, question_content="x", eval_sample=eval_sample)
 
 
-def test_evaluator_scores_correct_generation_one():
+@pytest.mark.parametrize("gen, expected", [(GOOD_GEN, 1.0), (BAD_GEN, 0.0)])
+def test_evaluator_scores(gen, expected):
     ev = LiveCodeBenchEvaluator(timeout_seconds=6.0)
-    assert ev.evaluate_sample(_instance(STDIN_SAMPLE), GOOD_GEN).score == 1.0
-
-
-def test_evaluator_scores_wrong_generation_zero():
-    ev = LiveCodeBenchEvaluator(timeout_seconds=6.0)
-    assert ev.evaluate_sample(_instance(STDIN_SAMPLE), BAD_GEN).score == 0.0
+    assert ev.evaluate_sample(_instance(STDIN_SAMPLE), gen).score == expected
 
 
 def test_evaluator_memoizes_identical_generations(monkeypatch):
@@ -247,6 +223,30 @@ def test_iter_release_rows_raw_filter_skips_rows(tmp_path, monkeypatch):
     rows = list(iter_release_rows("release_v1",
                                   raw_filter=lambda r: r["contest_date"] >= "2024"))
     assert [r["question_id"] for r in rows] == ["q-stdin-1"]
+
+
+def _raw_min(qid, date="2024-01-01T00:00:00"):
+    return {"question_id": qid, "question_content": f"Q {qid}.", "platform": "codeforces",
+            "contest_date": date, "difficulty": "easy", "starter_code": "",
+            "public_test_cases": json.dumps([{"input": "1\n", "output": "1\n", "testtype": "stdin"}]),
+            "private_test_cases": json.dumps([]), "metadata": json.dumps({})}
+
+
+def test_iter_release_rows_cumulative_dedupes_across_windows(tmp_path, monkeypatch):
+    # qDUP appears in BOTH windows; cumulative load must yield it once, tagged to v1 (first seen).
+    (tmp_path / "test.jsonl").write_text(json.dumps(_raw_min("qA")) + "\n" + json.dumps(_raw_min("qDUP")) + "\n")
+    (tmp_path / "test2.jsonl").write_text(json.dumps(_raw_min("qDUP")) + "\n" + json.dumps(_raw_min("qB")) + "\n")
+    files = {"test.jsonl": str(tmp_path / "test.jsonl"), "test2.jsonl": str(tmp_path / "test2.jsonl")}
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", lambda **kw: files[kw["filename"]])
+
+    rows = list(iter_release_rows("release_v2", cumulative=True))
+    assert [r["question_id"] for r in rows] == ["qA", "qDUP", "qB"]  # each once, v1 before v2
+    rel = {r["question_id"]: r["release"] for r in rows}
+    assert rel["qDUP"] == "release_v1" and rel["qB"] == "release_v2"  # first-seen window wins
+
+    # cumulative=False loads only the release_v2 window
+    only = [r["question_id"] for r in iter_release_rows("release_v2", cumulative=False)]
+    assert only == ["qDUP", "qB"]
 
 
 # ------------------------------ dataset / holdout ------------------------------ #

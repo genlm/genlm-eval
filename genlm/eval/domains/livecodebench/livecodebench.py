@@ -251,7 +251,7 @@ def default_prompt_formatter(tokenizer, instance: LiveCodeBenchInstance,
     style="codeqwen" = CodeQwenInstruct style (raw <|im_*|> completion string)."""
     row = {"question_content": instance.question_content, "starter_code": instance.starter_code}
     text = format_lcb_prompt(row, tokenizer=tokenizer, chat_template=use_chat_format, style=style)
-    if style == "codeqwen":
-        return tokenizer.encode(text)  # manual chat tokens; vLLM-default specials
+    if style in ("codeqwen", "deepseek"):
+        return tokenizer.encode(text)  # raw completion string; vLLM-default specials
     # Chat template already includes the BOS; avoid a second one on re-encode.
     return tokenizer.encode(text, add_special_tokens=not use_chat_format)

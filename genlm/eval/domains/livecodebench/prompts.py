@@ -14,8 +14,14 @@ SYSTEM_MESSAGE = (
 SYSTEM_MESSAGE_CODEQWEN = (
     "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user"
 )
+# lcb_runner DeepSeekCodeInstruct style (raw ### Instruction/Response completion string).
+SYSTEM_MESSAGE_DEEPSEEK = (
+    "You are an AI programming assistant, utilizing the DeepSeek Coder model, developed "
+    "by DeepSeek Company, and you answer questions related to computer science."
+)
 DEFAULT_STOP = ["###"]  # lcb_runner default --stop; apply at decode time (see cookbook)
-STYLES = ("generic", "codeqwen")
+STYLES = ("generic", "codeqwen", "deepseek")
+RAW_STYLES = ("codeqwen", "deepseek")  # raw completion strings (no apply_chat_template)
 
 # Verbatim from lcb_runner PromptConstants.
 _FORMATTING_WITH_STARTER = (
@@ -57,16 +63,33 @@ def _codeqwen_body(question_content: str, starter_code: str) -> str:
     return body
 
 
+def _deepseek_body(question_content: str, starter_code: str) -> str:
+    """Official get_deepseekcode_question_template_answer (### Instruction/Response)."""
+    body = ("### Instruction: You will be given a question (problem specification) and "
+            "will generate a correct Python program that matches the specification and "
+            "passes all tests. You will NOT return anything except for the program.\n\n")
+    body += f"Question:\n{question_content}\n\n"
+    if starter_code:
+        body += f"### Instruction: {_FORMATTING_WITH_STARTER}\n```python\n{starter_code}\n```\n\n"
+    else:
+        body += f"### Instruction: {_FORMATTING_WITHOUT_STARTER}\n```python\n# YOUR CODE HERE\n```\n\n"
+    body += "### Response:\n\n"
+    return body
+
+
 def format_lcb_prompt(row: Mapping[str, str], tokenizer=None,
                       chat_template: bool = False, style: str = "generic") -> str:
     """Prompt for an lcb_runner LMStyle: "generic" (LLaMa3, via chat template when
-    chat_template=True) or "codeqwen" (CodeQwenInstruct, raw <|im_*|> string)."""
+    chat_template=True), "codeqwen" (CodeQwenInstruct, raw <|im_*|> string), or
+    "deepseek" (DeepSeekCodeInstruct, raw ### Instruction/Response string)."""
     if style not in STYLES:
         raise ValueError(f"style must be one of {STYLES}; got {style!r}")
     qc, sc = row.get("question_content", ""), row.get("starter_code", "") or ""
     if style == "codeqwen":
         # official joins system + body with a blank line ("...<|im_start|>user\n\n...")
         return f"{SYSTEM_MESSAGE_CODEQWEN}\n\n{_codeqwen_body(qc, sc)}"
+    if style == "deepseek":
+        return f"{SYSTEM_MESSAGE_DEEPSEEK}\n\n{_deepseek_body(qc, sc)}"
     body = _user_body(qc, sc)
     if chat_template and tokenizer is not None:
         messages = [{"role": "system", "content": SYSTEM_MESSAGE},
