@@ -39,6 +39,7 @@ nav:
       - Text to SQL (Spider): cookbook/domains/spider.ipynb
       - Molecular Synthesis: cookbook/domains/molecular_synthesis.ipynb
       - Python for data science (DS-1000): cookbook/domains/ds1000.ipynb
+      - Competitive programming (LiveCodeBench): cookbook/domains/livecodebench.ipynb
       - Goal Inference: cookbook/domains/goal_inference.ipynb
     - Custom Domains: cookbook/custom_domains.ipynb
     - Custom Potentials: cookbook/custom_potentials.ipynb
