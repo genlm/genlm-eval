@@ -1,9 +1,7 @@
-"""Warm fork-server execution backend for the DS-1000 potential.
-
-One worker per (python_executable, extra_env, event loop) pre-imports the
-science libraries and forks an isolated child per harness script, cutting
-per-check cost from seconds to milliseconds. Any backend failure raises
-ForkserverUnavailable; callers fall back to the plain subprocess path.
+"""Warm fork-server execution backend for the DS-1000 potential: one worker
+per (python_executable, extra_env, event loop), forking a child per check.
+Backend failures raise ForkserverUnavailable; callers fall back to plain
+subprocesses.
 """
 
 import asyncio
@@ -111,12 +109,10 @@ class ForkserverExecutor:
 
     async def run_session(self, skey, setup, body, fallback, timeout):
         """
-        Run `body` in a warm per-task session (setup executed once per skey);
-        the worker runs `fallback` through the plain path if the session is
-        unusable. Same return contract as run().
+        Run `body` in a warm per-task session (setup once per skey; the worker
+        falls back to `fallback` if the session is unusable). Contract of run().
         """
-        # Session requests may wait behind one-off setup (<=120s) and the
-        # per-task serialized checks, so budget slack from the timeout.
+        # Slack for one-off setup (<=120s) plus per-task serialized checks.
         return await self._request(
             {
                 "skey": skey,
@@ -153,9 +149,8 @@ class ForkserverExecutor:
             out = await asyncio.wait_for(fut, timeout=timeout + wait_extra)
         except asyncio.TimeoutError:
             self._futures.pop(rid, None)
-            # No worker verdict at all: backend congestion, not a script
-            # timeout (the worker stamps those). Strict callers re-run via
-            # the subprocess fallback rather than misreading it as -inf.
+            # No worker verdict = backend congestion, not a script timeout
+            # (the worker stamps those); strict callers re-run via fallback.
             if congestion_raises:
                 raise ForkserverUnavailable("fork-server response overdue")
             return None

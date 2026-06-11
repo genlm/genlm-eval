@@ -74,15 +74,11 @@ def _exec_context_head(code_context: str):
 
 class DS1000RuntimeNoErrorPotential(Potential):
     """
-    DS-1000 expensive potential: execute the harness on a code prefix or a
-    complete solution. Return 0.0 if no error, -inf otherwise.
-
-    prefix() asks "can this prefix still extend to a valid solution": it
-    executes only `exec_context` up to `[insert]` plus the partial solution,
-    skipping the answer checks (result extraction, exec_test, context tail)
-    that a partial solution legitimately cannot satisfy yet; syntactically
-    incomplete prefixes are deferred (0.0). complete() runs the full
-    `test_execution` harness; any non-assertion error is -inf.
+    DS-1000 expensive potential: 0.0 if the harness raises no error, -inf
+    otherwise. prefix() executes only exec_context up to [insert] plus the
+    partial solution, skipping answer checks a partial solution cannot
+    satisfy yet; incomplete syntax defers. complete() runs the full
+    test_execution harness; any non-assertion error is -inf.
     """
 
     def __init__(
@@ -107,11 +103,9 @@ class DS1000RuntimeNoErrorPotential(Potential):
         # strict_prefix=True scores prefixes with the full harness (answer
         # checks included) instead of the head-only check.
         self.strict_prefix = bool(strict_prefix)
-        # use_forkserver=True runs harness scripts through a warm fork-server
-        # (one shared worker per python executable) instead of a fresh
-        # subprocess per check; on any backend failure it falls back to the
-        # subprocess path. Note: env vars read at interpreter startup (e.g.
-        # PYTHONHASHSEED) only take effect at worker start.
+        # use_forkserver=True: warm fork-server instead of a subprocess per
+        # check, with subprocess fallback on backend failure. Startup-time env
+        # vars (e.g. PYTHONHASHSEED) only apply at worker start.
         self.use_forkserver = bool(use_forkserver)
         self._n_test_cases = _test_case_count(code_context)
         self._ec_head, self._ec_block_insert = _exec_context_head(code_context)
@@ -122,10 +116,8 @@ class DS1000RuntimeNoErrorPotential(Potential):
         # statements, so defer them without paying the timeout again.
         self._hung_prefixes = []
         self._hung_prefixes_maxsize = 16
-        # SMC frequently clones particles into identical or repeated prefixes.
-        # Cache exact postprocessed code strings to avoid launching duplicate
-        # DS1000 subprocess checks. The cache is per potential instance, whose
-        # code_context / timeout / environment are fixed.
+        # SMC clones particles into repeated prefixes; cache verdicts per
+        # exact postprocessed code (instance config is fixed).
         self._score_cache = OrderedDict()
         self._score_cache_maxsize = 4096
         self.cache_hits = 0
@@ -155,9 +147,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
             return toks
         if isinstance(toks, bytes):
             return toks.decode("utf-8", errors="ignore")
-        # genlm-control/vLLM contexts may be either byte tokens or integer byte ids.
-        # Normalize both forms before decoding so the potential is robust across
-        # backend/token-map representations.
+        # Contexts may be byte tokens or integer byte ids; normalize both.
         byte_pieces = []
         for tok in toks:
             if isinstance(tok, int):
@@ -218,9 +208,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
             context = self.f(context)
         code = self._bytes_to_str(context)
         code = _postprocess_code(code)
-        # Empty completion don't define `result`, so the harness will
-        # always raise KeyError. Skip the subprocess and return -inf directly.
-        # The LM often emits EOS / "</code>" as the first token.
+        # Empty completions never define `result`; skip the subprocess.
         if not code:
             return float("-inf")
         out = await self._score_no_error(code, mode="complete")
@@ -317,14 +305,12 @@ class DS1000RuntimeNoErrorPotential(Potential):
                     tree = ast.parse(head + solution, filename="<prefix>", mode="exec")
                 except SyntaxError:
                     print(SYNTAX); raise SystemExit(0)
-                # A trailing compound statement (for/if/def/... -- anything with
-                # a body) may still be extended by the generation, so executing
-                # it now could raise errors the full solution would not.
+                # A trailing compound statement may still be extended by the
+                # generation: do not execute it yet.
                 if tree.body and hasattr(tree.body[-1], "body"):
                     tree.body = tree.body[:-1]
-                # Statements starting within the head (which alone may not
-                # parse, e.g. a dangling def the solution completes) are
-                # harness-side; the rest belong to the solution.
+                # Head statements (the head alone may not parse, e.g. a
+                # dangling def) are harness-side; the rest is solution.
                 head_lines = head.count("\\n")
                 n_head = sum(1 for st in tree.body if st.lineno <= head_lines)
                 head_prog = compile(
@@ -338,9 +324,8 @@ class DS1000RuntimeNoErrorPotential(Potential):
                     "exec",
                 )
                 for i in range(n_cases):
-                    # Failures while building the test environment (some
-                    # harnesses set up files etc. inside test_execution) are
-                    # not the solution's fault: defer.
+                    # Test-environment setup failures are not the
+                    # solution's fault: defer.
                     try:
                         test_input, expected_result = gtc(i + 1)
                         test_env = {{"test_input": test_input}}
