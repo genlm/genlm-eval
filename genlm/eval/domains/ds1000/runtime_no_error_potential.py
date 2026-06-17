@@ -116,11 +116,9 @@ def _test_case_count(code_context: str) -> int:
 
 def _exec_context_head(code_context: str):
     """
-    Return (head, is_block_insert): the exec_context source before the
-    `[insert]` line (None if not found), and whether `[insert]` stands alone
-    on its line. Some problems insert the solution as an indented function
-    body that only parses together with the head; inline inserts (e.g.
-    `[insert].numpy()`) cannot be partially executed at all.
+    Return (head, is_block_insert): exec_context before the `[insert]` line
+    (None if absent), and whether `[insert]` is on its own line (vs inline,
+    e.g. `[insert].numpy()`).
     """
     m = re.search(r"exec_context\s*=\s*r?(\"\"\"|''')(.*?)\1", code_context, re.S)
     if not m:
@@ -138,11 +136,9 @@ def _exec_context_head(code_context: str):
 
 class DS1000RuntimeNoErrorPotential(Potential):
     """
-    DS-1000 expensive potential: 0.0 if the harness raises no error, -inf
-    otherwise. prefix() executes only exec_context up to [insert] plus the
-    partial solution, skipping answer checks a partial solution cannot
-    satisfy yet; incomplete syntax defers. complete() runs the full
-    test_execution harness; any non-assertion error is -inf.
+    DS-1000 potential: 0.0 if the harness raises no error, -inf otherwise.
+    prefix() runs exec_context-head + partial solution (no answer checks);
+    complete() runs the full test_execution harness.
     """
 
     def __init__(

@@ -1,7 +1,5 @@
-"""Warm fork-server execution backend for the DS-1000 potential: one worker
-per (python_executable, extra_env, event loop), forking a child per check.
-Backend failures raise ForkserverUnavailable; callers fall back to plain
-subprocesses.
+"""Warm fork-server execution backend for the DS-1000 potential. Backend
+failures raise ForkserverUnavailable; callers fall back to subprocesses.
 """
 
 import asyncio

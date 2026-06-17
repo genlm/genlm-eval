@@ -1,10 +1,8 @@
 #!/usr/bin/env python
 """
 Warm fork-server for DS-1000 harness scripts: pre-imports the science libs
-(tensorflow excluded, fork-unsafe), forks an isolated child per request, and
-serves session requests from a warm per-task child (fallback script on
-failure). JSON lines in/out; timeout/crash verdicts end with an id-stamped
-"<<<WORKER <id> ...>>>" line.
+(not tensorflow, fork-unsafe) and forks a child per request, or from a warm
+per-task session child. JSON lines in/out.
 """
 
 import json
