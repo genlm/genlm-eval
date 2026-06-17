@@ -19,6 +19,70 @@ from genlm.eval.domains.ds1000.utils import _postprocess_code, _sandbox_env
 # there and no continuation can change the solution anymore.
 _TERMINAL_MARKERS = ("</code>", "\nEND SOLUTION")
 
+# Bound concurrent subprocess spawns per event loop: asyncio's default child
+# watcher starts one OS thread per subprocess, so an unbounded fallback storm
+# (e.g. fork-server down + high caller concurrency) exhausts the thread limit.
+_subprocess_sems = {}
+
+
+def _subprocess_sem():
+    loop = asyncio.get_running_loop()
+    sem = _subprocess_sems.get(id(loop))
+    if sem is None:
+        n = int(os.environ.get("DS1000_SUBPROCESS_CONCURRENCY", "8"))
+        sem = asyncio.Semaphore(n)
+        _subprocess_sems[id(loop)] = sem
+    return sem
+
+# Single source of truth for prefix judging, embedded verbatim into every
+# harness script (stateless and session) so the paths cannot drift. Defines
+# `_judge_prefix`, returning one of the OK/BAD/SYNTAX markers. chr(10)/chr(92)
+# stand in for newline/backslash to keep this free of escape sequences when
+# emitted into a generated script.
+_PREFIX_JUDGE_SRC = '''
+def _judge_prefix(answer, head, skip, test_inputs, OK, BAD, SYNTAX):
+    import ast
+    _nl = chr(10)
+    try:
+        solution = answer
+        # Matplotlib harnesses drop plt.show()/savefig/... before executing.
+        if callable(skip):
+            solution = _nl.join(filter(skip, solution.split(_nl)))
+        # Trailing line-continuation: a later boundary completes it -> defer.
+        if solution.rstrip().endswith(chr(92)):
+            return OK
+        try:
+            tree = ast.parse(head + solution, filename="<prefix>", mode="exec")
+        except SyntaxError:
+            return SYNTAX
+        # A trailing compound statement may still be extended: do not run it.
+        if tree.body and hasattr(tree.body[-1], "body"):
+            tree.body = tree.body[:-1]
+        # Head statements (head alone may not parse, e.g. a dangling def) are
+        # harness-side; the rest is the solution.
+        head_lines = head.count(_nl)
+        n_head = sum(1 for st in tree.body if st.lineno <= head_lines)
+        head_prog = compile(
+            ast.Module(body=tree.body[:n_head], type_ignores=[]), "<prefix>", "exec")
+        sol_prog = compile(
+            ast.Module(body=tree.body[n_head:], type_ignores=[]), "<prefix>", "exec")
+        for ti in test_inputs:
+            test_env = {"test_input": ti}
+            try:
+                exec(head_prog, test_env)
+            except Exception:
+                # Test-environment setup failure is not the solution's fault.
+                return OK
+            exec(sol_prog, test_env)
+        return OK
+    except AssertionError:
+        return OK
+    except SyntaxError:
+        return SYNTAX
+    except Exception:
+        return BAD
+'''
+
 
 def _prefix_syntax_status(code: str) -> str:
     """
@@ -90,7 +154,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
         extra_env: Optional[Dict[str, str]] = None,
         f: Optional[Callable[[List[bytes]], List[bytes]]] = None,
         strict_prefix: bool = False,
-        use_forkserver: bool = False,
+        use_forkserver: bool = True,
     ):
         vocabulary = vocabulary or [bytes([i]) for i in range(256)]
         super().__init__(vocabulary=vocabulary)
@@ -103,10 +167,16 @@ class DS1000RuntimeNoErrorPotential(Potential):
         # strict_prefix=True scores prefixes with the full harness (answer
         # checks included) instead of the head-only check.
         self.strict_prefix = bool(strict_prefix)
-        # use_forkserver=True: warm fork-server instead of a subprocess per
-        # check, with subprocess fallback on backend failure. Startup-time env
-        # vars (e.g. PYTHONHASHSEED) only apply at worker start.
-        self.use_forkserver = bool(use_forkserver)
+        # Warm fork-server (default), same verdicts as the subprocess path but
+        # faster, with subprocess fallback. DS1000_FORKSERVER=0 is the ops
+        # kill-switch; startup env vars (e.g. PYTHONHASHSEED) apply at worker start.
+        if os.environ.get("DS1000_FORKSERVER") == "0":
+            use_forkserver = False
+        # TensorFlow is unsafe to import in a forked child (it is the one lib
+        # the worker does not pre-import); such checks fork-then-import TF and
+        # mis-score. Force the subprocess path (fresh interpreter) for them.
+        self._fork_unsafe = "import tensorflow" in code_context
+        self.use_forkserver = bool(use_forkserver) and not self._fork_unsafe
         self._n_test_cases = _test_case_count(code_context)
         self._ec_head, self._ec_block_insert = _exec_context_head(code_context)
         self._session_key = "ds1000-" + uuid.uuid5(
@@ -266,15 +336,14 @@ class DS1000RuntimeNoErrorPotential(Potential):
 
     def _prefix_script(self, prefix_code: str, ok: str, bad: str, syntax: str) -> str:
         """
-        Script for solution prefixes: per test case, execute exec_context
-        head + partial solution parsed as ONE program (the solution may be an
-        indented function body), skipping everything after the insertion
-        point. A trailing compound statement is dropped since the generation
-        may still extend its suite.
+        Stateless prefix script: exec the code_context to build the test
+        inputs, then delegate to the shared `_judge_prefix`.
         """
-        return textwrap.dedent(
-            f"""
-            import sys, warnings, os, ast
+        return (
+            _PREFIX_JUDGE_SRC
+            + textwrap.dedent(
+                f"""
+            import warnings, os
             warnings.filterwarnings("ignore")
             os.environ.setdefault("PYTHONWARNINGS", "ignore")
             os.environ.setdefault("MPLBACKEND", "Agg")
@@ -292,55 +361,19 @@ class DS1000RuntimeNoErrorPotential(Potential):
                     # Unknown harness structure: never kill a prefix we cannot
                     # faithfully execute.
                     print(OK); raise SystemExit(0)
-                solution = answer
-                # Matplotlib harnesses drop plt.show()/savefig/... lines from
-                # the solution before executing it; mirror that here.
-                skip = g.get("skip_plt_cmds")
-                if callable(skip):
-                    solution = "\\n".join(filter(skip, solution.split("\\n")))
-                if solution.endswith("\\\\\\n"):
-                    # Trailing line-continuation: defer to a later boundary.
-                    print(OK); raise SystemExit(0)
                 try:
-                    tree = ast.parse(head + solution, filename="<prefix>", mode="exec")
-                except SyntaxError:
-                    print(SYNTAX); raise SystemExit(0)
-                # A trailing compound statement may still be extended by the
-                # generation: do not execute it yet.
-                if tree.body and hasattr(tree.body[-1], "body"):
-                    tree.body = tree.body[:-1]
-                # Head statements (the head alone may not parse, e.g. a
-                # dangling def) are harness-side; the rest is solution.
-                head_lines = head.count("\\n")
-                n_head = sum(1 for st in tree.body if st.lineno <= head_lines)
-                head_prog = compile(
-                    ast.Module(body=tree.body[:n_head], type_ignores=[]),
-                    "<prefix>",
-                    "exec",
-                )
-                sol_prog = compile(
-                    ast.Module(body=tree.body[n_head:], type_ignores=[]),
-                    "<prefix>",
-                    "exec",
-                )
-                for i in range(n_cases):
-                    # Test-environment setup failures are not the
-                    # solution's fault: defer.
-                    try:
-                        test_input, expected_result = gtc(i + 1)
-                        test_env = {{"test_input": test_input}}
-                        exec(head_prog, test_env)
-                    except Exception:
-                        print(OK); raise SystemExit(0)
-                    exec(sol_prog, test_env)
-                print(OK)
-            except AssertionError:
-                print(OK)
-            except SyntaxError:
-                print(SYNTAX)
+                    test_inputs = [gtc(i + 1)[0] for i in range(n_cases)]
+                except Exception:
+                    # Test-input generation is harness-side: defer.
+                    print(OK); raise SystemExit(0)
+                print(_judge_prefix(
+                    answer, head, g.get("skip_plt_cmds"), test_inputs, OK, BAD, SYNTAX))
+            except SystemExit:
+                raise
             except Exception:
                 print(BAD)
             """
+            )
         ).strip()
 
     async def _run_prefix_script(self, prefix_code, fallback_script, ok, bad, syntax):
@@ -371,9 +404,14 @@ class DS1000RuntimeNoErrorPotential(Potential):
         return await self._run_script(fallback_script)
 
     def _session_setup_script(self) -> str:
-        """Once-per-task session setup: context exec + test-input generation."""
-        return textwrap.dedent(
-            f"""
+        """
+        Once-per-task session setup: define the shared `_judge_prefix`, exec
+        the code_context, and build `head`/`skip`/`test_inputs` for body forks.
+        """
+        return (
+            _PREFIX_JUDGE_SRC
+            + textwrap.dedent(
+                f"""
             import warnings, os
             warnings.filterwarnings("ignore")
             os.environ.setdefault("PYTHONWARNINGS", "ignore")
@@ -389,59 +427,23 @@ class DS1000RuntimeNoErrorPotential(Potential):
                 raise RuntimeError("unknown harness structure")
             skip = g.get("skip_plt_cmds")
             test_inputs = [gtc(i + 1)[0] for i in range(n_cases)]
-            head_lines = head.count("\\n")
             # Warm the head's imports so per-check forks hit sys.modules.
-            for _line in head.split("\\n"):
+            for _line in head.split(chr(10)):
                 if _line.startswith(("import ", "from ")):
                     try:
                         exec(_line, {{}}, {{}})
                     except Exception:
                         pass
             """
+            )
         ).strip()
 
     def _session_body_script(self, prefix_code: str, ok, bad, syntax) -> str:
-        """Per-check body run in a fork of the session (uses its namespace)."""
+        """Per-check body, forked from the session: delegate to `_judge_prefix`."""
         return textwrap.dedent(
             f"""
-            import ast
             OK, BAD, SYNTAX = {ok!r}, {bad!r}, {syntax!r}
-            answer = {prefix_code!r}
-            try:
-                solution = answer
-                if callable(skip):
-                    solution = "\\n".join(filter(skip, solution.split("\\n")))
-                if solution.endswith("\\\\\\n"):
-                    print(OK); raise SystemExit(0)
-                try:
-                    tree = ast.parse(head + solution, filename="<prefix>", mode="exec")
-                except SyntaxError:
-                    print(SYNTAX); raise SystemExit(0)
-                if tree.body and hasattr(tree.body[-1], "body"):
-                    tree.body = tree.body[:-1]
-                n_head = sum(1 for st in tree.body if st.lineno <= head_lines)
-                head_prog = compile(
-                    ast.Module(body=tree.body[:n_head], type_ignores=[]),
-                    "<prefix>", "exec",
-                )
-                sol_prog = compile(
-                    ast.Module(body=tree.body[n_head:], type_ignores=[]),
-                    "<prefix>", "exec",
-                )
-                for ti in test_inputs:
-                    test_env = {{"test_input": ti}}
-                    try:
-                        exec(head_prog, test_env)
-                    except Exception:
-                        print(OK); raise SystemExit(0)
-                    exec(sol_prog, test_env)
-                print(OK)
-            except AssertionError:
-                print(OK)
-            except SyntaxError:
-                print(SYNTAX)
-            except Exception:
-                print(BAD)
+            print(_judge_prefix({prefix_code!r}, head, skip, test_inputs, OK, BAD, SYNTAX))
             """
         ).strip()
 
@@ -474,27 +476,31 @@ class DS1000RuntimeNoErrorPotential(Potential):
                     },
                 )
 
-                try:
-                    proc = await asyncio.create_subprocess_exec(
-                        self.python_executable,
-                        "-B",
-                        path,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        env=env,
-                        cwd=td,
-                    )
-                except OSError:
-                    # fork/pid exhaustion under load: transient, defer
-                    return None
-                try:
-                    stdout_b, stderr_b = await asyncio.wait_for(
-                        proc.communicate(), timeout=self.timeout_seconds
-                    )
-                except asyncio.TimeoutError:
-                    proc.kill()
-                    await proc.communicate()
-                    return None
+                # Hold a slot for the subprocess's whole lifetime so the child
+                # watcher's per-process threads stay bounded under load.
+                async with _subprocess_sem():
+                    try:
+                        proc = await asyncio.create_subprocess_exec(
+                            self.python_executable,
+                            "-B",
+                            path,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            env=env,
+                            cwd=td,
+                        )
+                    except (OSError, RuntimeError):
+                        # fork/pid/thread exhaustion under load ("can't start
+                        # new thread" is a RuntimeError): transient, defer.
+                        return None
+                    try:
+                        stdout_b, stderr_b = await asyncio.wait_for(
+                            proc.communicate(), timeout=self.timeout_seconds
+                        )
+                    except asyncio.TimeoutError:
+                        proc.kill()
+                        await proc.communicate()
+                        return None
         except subprocess.TimeoutExpired:
             return None
 
@@ -504,8 +510,8 @@ class DS1000RuntimeNoErrorPotential(Potential):
 
     async def _score_no_error(self, complete_code: str, mode: str = "complete") -> float:
         """
-        Run the harness script in a subprocess: 0.0 if no error (incl.
-        AssertionError), -inf otherwise. mode="complete" runs the full
+        Run the harness script (fork-server or subprocess): 0.0 if no error
+        (incl. AssertionError), -inf otherwise. mode="complete" runs the full
         test_execution harness; "prefix" only the context head + solution.
         """
         cache_key = (mode, complete_code)

@@ -163,10 +163,21 @@ class ForkserverExecutor:
 
     def kill(self):
         proc, self.proc = self.proc, None
-        if proc is not None and proc.returncode is None:
+        if proc is None:
+            return
+        if proc.returncode is None:
             # os.kill is independent of the (possibly closed) event loop.
             try:
                 os.kill(proc.pid, signal.SIGKILL)
+            except Exception:  # noqa: BLE001
+                pass
+        # Close the asyncio transport now: close() sets its closed flag before
+        # touching the (possibly dead) loop, so the later shutdown-GC __del__
+        # is a no-op -- avoids benign "Event loop is closed" tracebacks.
+        transport = getattr(proc, "_transport", None)
+        if transport is not None:
+            try:
+                transport.close()
             except Exception:  # noqa: BLE001
                 pass
 

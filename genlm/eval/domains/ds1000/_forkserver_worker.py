@@ -1,13 +1,9 @@
 #!/usr/bin/env python
 """
 Warm fork-server for DS-1000 harness scripts: pre-imports the science libs
-(tensorflow excluded, fork-unsafe), forks an isolated child per request.
-Session requests keep a per-task child alive past setup and fork checks from
-it, serialized per task; session failures run the request's fallback script.
-
-JSON lines, stdin -> stdout {"id", "out"}; {"ready": true} after warmup.
-plain: {"id", "script", "timeout"}; session: {"id", "skey", "setup", "body",
-"fallback", "timeout"}. Worker timeout/crash verdicts end with an id-stamped
+(tensorflow excluded, fork-unsafe), forks an isolated child per request, and
+serves session requests from a warm per-task child (fallback script on
+failure). JSON lines in/out; timeout/crash verdicts end with an id-stamped
 "<<<WORKER <id> ...>>>" line.
 """
 
