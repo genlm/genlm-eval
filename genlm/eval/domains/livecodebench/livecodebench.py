@@ -28,6 +28,8 @@ class LiveCodeBenchInstance(Instance):
     contest_date: str = ""
     # Pydantic v2 deep-copies this {} default per instance (not shared state).
     eval_sample: Dict[str, str] = {}  # may be empty for a prompts-only (generation) snapshot
+    # Public (example) tests only, for the verifier potentials. Empty for older snapshots.
+    public_eval_sample: Dict[str, str] = {}
 
 
 def _holdout_split(rows: List[dict], holdout: Optional[str], test_frac: float, seed: int) -> List[dict]:
@@ -116,6 +118,7 @@ class LiveCodeBenchDataset(Dataset[LiveCodeBenchInstance]):
                 testtype=row.get("testtype", "stdin"),
                 contest_date=row.get("contest_date") or "",
                 eval_sample=row.get("eval_sample") or {},
+                public_eval_sample=row.get("public_eval_sample") or {},
             )
 
     @property

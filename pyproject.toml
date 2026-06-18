@@ -43,6 +43,7 @@ ds1000 = [
 ]
 
 livecodebench = [
+    "genlm-control>=0.2.1",
     "huggingface_hub>=0.20",
 ]
 

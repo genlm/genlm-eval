@@ -48,8 +48,15 @@ def build_row(raw: Mapping[str, Any], release: str, max_tests: Optional[int] = N
     if max_tests is not None:
         inputs, outputs = inputs[:max_tests], outputs[:max_tests]
 
+    fn_name = metadata.get("func_name")
     eval_sample = {"input_output": json.dumps({
-        "inputs": inputs, "outputs": outputs, "fn_name": metadata.get("func_name"),
+        "inputs": inputs, "outputs": outputs, "fn_name": fn_name,
+    })}
+    # Public tests, separated so verifier potentials use them without leaking the
+    # private set. Public sort first, so this is a prefix of eval_sample.
+    n_public = len(public) if max_tests is None else min(len(public), max_tests)
+    public_eval_sample = {"input_output": json.dumps({
+        "inputs": inputs[:n_public], "outputs": outputs[:n_public], "fn_name": fn_name,
     })}
     return {
         "question_id": raw.get("question_id"),
@@ -61,6 +68,7 @@ def build_row(raw: Mapping[str, Any], release: str, max_tests: Optional[int] = N
         "testtype": derive_testtype(metadata, all_tests),
         "release": release,
         "eval_sample": eval_sample,
+        "public_eval_sample": public_eval_sample,
         "metadata": metadata,
     }
 

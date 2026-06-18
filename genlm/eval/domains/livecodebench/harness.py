@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import json
 import math
-import multiprocessing
 from typing import Any, Dict, List, Optional, Tuple
 
+from genlm.eval.domains.livecodebench.runtime_execution import mp_context
 from genlm.eval.domains.livecodebench.vendored.testing_util import run_test
 
 
@@ -39,23 +39,28 @@ def check_correctness(sample: Dict[str, str], generation: str,
     budget = (timeout + 1) * n_tests + 5  # official lcb_runner per-sample budget
     if max_total_seconds is not None:
         budget = min(budget, max_total_seconds)
-    parent_conn, child_conn = multiprocessing.Pipe(duplex=False)
-    p = multiprocessing.Process(
+    ctx = mp_context()
+    parent_conn, child_conn = ctx.Pipe(duplex=False)
+    p = ctx.Process(
         target=_child_run,
         args=(sample, generation, debug, child_conn, run_timeout),
     )
     p.start()
     child_conn.close()  # keep only the child's handle open on the write end
     try:
-        if parent_conn.poll(budget):
-            res, metadata = parent_conn.recv()
-            return list(res), dict(metadata)
-    except EOFError:  # child died without sending (crash inside run_test)
-        pass
-    finally:
+        # Wait (bounded) for the child to exit before reading, so we never call
+        # recv() on a live child and block forever on a partial frame.
+        p.join(budget)
         if p.is_alive():
             p.kill()
-        p.join()  # reap the child so it doesn't linger as a zombie
+            p.join()
+        elif parent_conn.poll(0):
+            try:
+                res, metadata = parent_conn.recv()
+                return list(res), dict(metadata)
+            except EOFError:  # crashed mid-send
+                pass
+    finally:
         parent_conn.close()
     return [-1] * n_tests, {"error": "global timeout or crashed child"}
 

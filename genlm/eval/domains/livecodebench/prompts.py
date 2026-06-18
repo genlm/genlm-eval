@@ -140,3 +140,37 @@ def extract_code(model_output: str, style: str = "generic") -> str:
     if len(fence_idxs) < 2:
         return ""
     return "\n".join(lines[fence_idxs[-2] + 1: fence_idxs[-1]])
+
+
+def extract_code_prefix(model_output: str, style: str = "generic") -> str:
+    """Code being written, for prefix scoring: text after the last open fence, or
+    "" when no block is open. Deferring on a closed block (a later block could
+    supersede it) keeps prefix consistent with ``extract_code`` at complete.
+    style="genericbase" = whole stripped output."""
+    if style == "genericbase":
+        return model_output.strip()
+    lines = model_output.split("\n")
+    fence_idxs = [i for i, ln in enumerate(lines) if "```" in ln]
+    if len(fence_idxs) % 2 == 1:  # block open: judge text after the last fence
+        return "\n".join(lines[fence_idxs[-1] + 1:])
+    return ""  # closed or no block: defer to complete()
+
+
+def decode_context(context) -> str:
+    """Decode a genlm.control context (str/bytes/list of byte tokens or int byte
+    ids) into text."""
+    if not context:
+        return ""
+    if isinstance(context, str):
+        return context
+    if isinstance(context, bytes):
+        return context.decode("utf-8", errors="ignore")
+    pieces = []
+    for tok in context:
+        if isinstance(tok, int):
+            pieces.append(bytes([tok]))
+        elif isinstance(tok, bytes):
+            pieces.append(tok)
+        else:
+            pieces.append(str(tok).encode("utf-8", errors="ignore"))
+    return b"".join(pieces).decode("utf-8", errors="ignore")
