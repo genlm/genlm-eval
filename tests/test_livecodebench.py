@@ -20,9 +20,11 @@ from genlm.eval.domains.livecodebench import (
     build_row,
     derive_testtype,
     iter_release_rows,
+    capture,
 )
 from genlm.eval.domains.livecodebench.fetch import _release_num
 from genlm.eval.domains.livecodebench.prompts import SYSTEM_MESSAGE_DEEPSEEK
+from genlm.eval.domains.livecodebench.vendored import testing_util
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 SAMPLE = FIXTURE_DIR / "lcb_sample.jsonl"
@@ -84,6 +86,16 @@ def test_extract_code(out, expected):
     assert extract_code(out).strip() == expected
 
 
+# Reasoning models: extract_code keeps only the post-</think> answer so a code fence inside the CoT
+# is never mistaken for the solution; output with no </think> is unchanged (covered above).
+@pytest.mark.parametrize("out, expected", [
+    ("<think>draft ```python\nwrong()\n```</think>\n```python\nright()\n```\n", "right()"),  # CoT fence ignored
+    ("<think>```python\nonly_in_think()\n```</think>\nplain answer, no fences", ""),           # no answer fence -> ""
+])
+def test_extract_code_keeps_only_post_think_answer(out, expected):
+    assert extract_code(out).strip() == expected
+
+
 # ------------------------------ harness ------------------------------ #
 
 STDIN_SAMPLE = {"input_output": json.dumps(
@@ -116,6 +128,27 @@ def test_malformed_eval_sample_fails_gracefully():
 def test_check_correctness_returns_per_test_list():
     results, _ = check_correctness(STDIN_SAMPLE, STDIN_GOOD, timeout=6.0)
     assert len(results) == 2 and all(r == 1 for r in results)
+
+
+@pytest.mark.parametrize("sample, bad, good", [
+    (STDIN_SAMPLE, STDIN_BAD, STDIN_GOOD),   # stdio path -> grade_stdio_cap
+    (FUNC_SAMPLE, FUNC_BAD, FUNC_GOOD),       # call-based path -> grade_call_based_cap
+])
+def test_capture_runs_all_tests_and_records(sample, bad, good):
+    orig = (testing_util.grade_call_based, testing_util.grade_stdio)  # enable_capture swaps globals; restore after
+    capture.enable_capture()
+    try:
+        assert capture.is_enabled()
+        # a wrong solution still runs BOTH tests (no short-circuit at the first failure) and captures each
+        _, meta = check_correctness(sample, bad, timeout=6.0)
+        ex = meta["executions"]
+        assert len(ex) == 2 and all(not e["passed"] for e in ex)
+        assert {"output_kind", "passed", "error_code", "output_hash", "expected_hash", "test_idx"} <= set(ex[0])
+        # a correct solution is captured as all-passed
+        _, meta_ok = check_correctness(sample, good, timeout=6.0)
+        assert all(e["passed"] for e in meta_ok["executions"])
+    finally:
+        testing_util.grade_call_based, testing_util.grade_stdio = orig
 
 
 SLEEPY_SAMPLE = {"input_output": json.dumps(

@@ -108,10 +108,14 @@ def _genericbase_body(question_content: str, starter_code: str) -> str:
 
 
 def format_lcb_prompt(row: Mapping[str, str], tokenizer=None,
-                      chat_template: bool = False, style: str = "generic") -> str:
+                      chat_template: bool = False, style: str = "generic",
+                      enable_thinking: bool | None = None) -> str:
     """Prompt for an lcb_runner LMStyle: "generic" (LLaMa3, via chat template when
     chat_template=True), "codeqwen" (CodeQwenInstruct, raw <|im_*|> string), or
-    "deepseek" (DeepSeekCodeInstruct, raw ### Instruction/Response string)."""
+    "deepseek" (DeepSeekCodeInstruct, raw ### Instruction/Response string).
+
+    enable_thinking forwards to apply_chat_template (Qwen3-style reasoning toggle); left
+    out of the call when None so non-reasoning templates are unaffected."""
     if style not in STYLES:
         raise ValueError(f"style must be one of {STYLES}; got {style!r}")
     qc, sc = row.get("question_content", ""), row.get("starter_code", "") or ""
@@ -126,13 +130,19 @@ def format_lcb_prompt(row: Mapping[str, str], tokenizer=None,
     if chat_template and tokenizer is not None:
         messages = [{"role": "system", "content": SYSTEM_MESSAGE},
                     {"role": "user", "content": body}]
-        return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        kw = {} if enable_thinking is None else {"enable_thinking": enable_thinking}
+        return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, **kw)
     return f"{SYSTEM_MESSAGE}\n\n{body}"
 
 
 def extract_code(model_output: str, style: str = "generic") -> str:
     """Code between the last two ``` fences (last block if 3+); "" if fewer than two.
     style="genericbase" = whole stripped output. Matches lcb_runner extract_code."""
+    # Reasoning models (Qwen3, R1, ...) emit <think>...</think> before the answer; keep only the
+    # post-think answer so a code fence inside the reasoning can't be mistaken for the solution.
+    # No </think> (every existing non-reasoning model) leaves the output unchanged.
+    if "</think>" in model_output:
+        model_output = model_output.rsplit("</think>", 1)[1]
     if style == "genericbase":
         return model_output.strip()
     lines = model_output.split("\n")
