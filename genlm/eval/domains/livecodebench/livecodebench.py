@@ -245,14 +245,17 @@ class LiveCodeBenchEvaluator(Evaluator[LiveCodeBenchInstance]):
 
 
 def default_prompt_formatter(tokenizer, instance: LiveCodeBenchInstance,
-                             use_chat_format: bool = False, style: str = "generic") -> List[int]:
+                             use_chat_format: bool = False, style: str = "generic",
+                             enable_thinking: bool | None = None) -> List[int]:
     """Build the LCB prompt for ``instance`` and return token ids.
 
     style="generic" + use_chat_format=True = LLaMa3 lcb_runner style (chat template).
     style="codeqwen"/"deepseek"/"genericbase" = raw completion strings; genericbase
-    needs the matching evaluator extraction_style."""
+    needs the matching evaluator extraction_style.
+    enable_thinking forwards to the chat template (Qwen3 reasoning toggle)."""
     row = {"question_content": instance.question_content, "starter_code": instance.starter_code}
-    text = format_lcb_prompt(row, tokenizer=tokenizer, chat_template=use_chat_format, style=style)
+    text = format_lcb_prompt(row, tokenizer=tokenizer, chat_template=use_chat_format, style=style,
+                             enable_thinking=enable_thinking)
     if style in RAW_STYLES:
         return tokenizer.encode(text)  # raw completion string; vLLM-default specials
     # Chat template already includes the BOS; avoid a second one on re-encode.
