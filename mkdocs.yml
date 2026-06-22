@@ -37,6 +37,7 @@ nav:
     - Supported Domains:
       - Pattern Matching: cookbook/domains/pattern_matching.ipynb
       - Text to SQL (Spider): cookbook/domains/spider.ipynb
+      - Text to SQL (Spider 2.0-Lite): cookbook/domains/spider2.ipynb
       - Molecular Synthesis: cookbook/domains/molecular_synthesis.ipynb
       - Python for data science (DS-1000): cookbook/domains/ds1000.ipynb
       - Competitive programming (LiveCodeBench): cookbook/domains/livecodebench.ipynb

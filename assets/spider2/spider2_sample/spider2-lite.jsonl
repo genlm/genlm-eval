@@ -1,0 +1,2 @@
+{"instance_id": "local_concert_001", "db": "concert_singer", "question": "How many singers do we have?", "external_knowledge": null}
+{"instance_id": "local_concert_002", "db": "concert_singer", "question": "What is the total number of singers?", "external_knowledge": null}

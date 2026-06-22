@@ -13,7 +13,7 @@ A flexible framework for evaluating constrained generation models, built for the
 - **Getting Started**: Visit our [documentation](https://genlm.github.io/genlm-eval/) for installation and usage guides.
 - **API Reference**: Browse the [API documentation](https://genlm.github.io/genlm-eval/reference/) for detailed information about the library's components.
 - **Cookbook**: Check out our [examples and tutorials](https://genlm.github.io/genlm-eval/cookbook/) for:
-    * Using built-in domains (Pattern Matching, Text-to-SQL, Molecular Synthesis)
+    * Using built-in domains (Pattern Matching, Text-to-SQL Spider, Text-to-SQL Spider 2.0-Lite, Molecular Synthesis)
     * Creating custom evaluation domains
 
 ## Components

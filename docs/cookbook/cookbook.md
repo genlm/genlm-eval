@@ -54,6 +54,14 @@ Evaluate models on generating SQL queries from natural language:
 
 [View Example](domains/spider.ipynb)
 
+#### Text to SQL (Spider 2.0-Lite)
+Evaluate models on real-world enterprise text-to-SQL workflows:
+
+- Task: Generate complex SQL queries that answer analytical questions over real-world databases
+- Data: Spider 2.0-Lite dataset (SQLite local subset), reusing the Spider potential
+
+[View Example](domains/spider2.ipynb)
+
 #### Python for Data Science (DS-1000)
 Evaluate models on valid and executable Python code:
 
