@@ -1,18 +1,14 @@
 """Per-language prompt construction for multilingual LiveCodeBench (stdin/stdout problems).
 
-Mirrors Multi-LCB ``lcb_runner/prompts/code_generation.py`` for the no-starter-code (stdin)
-path so the 12 mainstream languages are prompt-comparable to the paper. We only handle stdin
-problems, so the starter-code and LeetCode prompt-enhancer branches never apply. The
-``<param:Plang>`` / ``<param:plang>`` / ``<param:comment>`` placeholders are filled from the
-language registry (which matches PLang). Code extraction (``extract_code``) matches
-Multi-LCB's extractor (first fenced block, placeholder stripped), not the official-lcb_runner
-extractor used by the Python-only domain, so multilingual grading matches the Multi-LCB pipeline.
+Mirrors Multi-LCB's stdin prompt so the 12 Multi-LCB languages are prompt-comparable to the
+paper. ``extract_code`` matches Multi-LCB's extractor (first fenced block, placeholder
+stripped), not the Python-only domain's, so grading matches the Multi-LCB pipeline.
 """
 
 import re
 from typing import Dict, List
 
-from .languages import Language, resolve_language
+from .dataset import Language, resolve_language
 
 # Verbatim from Multi-LCB PromptConstants (MIT), with the placeholders kept as {fields}.
 SYSTEM_MESSAGE_GENERIC = (
@@ -61,7 +57,7 @@ def extract_code(model_output) -> str:
 
 def _system_message(lang: Language) -> str:
     msg = SYSTEM_MESSAGE_GENERIC.format(display=lang.display)
-    # Low-resource languages get an extra guidance line; empty for the 12 mainstream
+    # Low-resource languages get an extra guidance line; empty for the 12 Multi-LCB
     # languages, so their system message stays byte-identical to Multi-LCB's.
     if lang.prompt_nudge:
         msg = f"{msg}\n\n{lang.prompt_nudge}"

@@ -5,7 +5,7 @@ Source: github.com/Multi-LCB/Multi-LCB @ d80be9f
 Entry point: eval_plang_code(program, input_data, output_data, plang, timeout).
 
 This copy is edited for genlm-eval (not verbatim); each change is marked with a
-"genlm-eval edit:" comment. See MULTILINGUAL_LCB_PLAN.md for the full edit list.
+"genlm-eval edit:" comment.
 """
 
 import fcntl
@@ -161,14 +161,10 @@ def get_build_status(result: Result) -> Status:
 
 
 def get_run_status(result: Result) -> Status:
-    # genlm-eval edit: the exit code is authoritative. A program that exits 0 succeeded,
-    # regardless of what it wrote to stderr; upstream classified failures by stderr substring
-    # before the exit code, so a correct program (exit 0, matching stdout) that merely logged
-    # "ValueError"/"TimeoutExpired"/"out of memory" to stderr was failed. Under the
-    # stdin/stdout contract stdout-match decides correctness. Real timeouts are signalled by
-    # run() with exit_code None (communicate raised) plus the TimeoutExpired repr in stderr,
-    # so they fall through the exit-0 check; the substrings only label a non-zero-exit failure.
-    # Ref: github.com/Multi-LCB/Multi-LCB@d80be9f lcb_runner/evaluation/testing_plang.py:147
+    # genlm-eval edit: exit code is authoritative. Exit 0 with matching stdout passed, even if
+    # the program logged "ValueError"/"TimeoutExpired"/"out of memory" to stderr (upstream keyed
+    # on stderr substrings first and failed it). Real timeouts surface as exit_code None, so they
+    # still fall through; the substrings only label a non-zero-exit failure.
     if result.exit_code == 0:
         return Status.Done
 
@@ -455,11 +451,9 @@ def eval_script_cpp(
                 sconf=sconf,
             )
 
-            # genlm-eval edit: removed two upstream `raise SyntaxError(...)` guards that
-            # fired on cluster-specific stderr substrings ("...9.2.0-skylake/", "/4.8.2").
-            # They propagated uncaught out of eval_plang_code (aborting the whole run), and
-            # "/4.8.2" is broad enough to match unrelated output. Original:
-            # github.com/Multi-LCB/Multi-LCB@d80be9f lcb_runner/evaluation/testing_plang.py:442
+            # genlm-eval edit: removed two upstream `raise SyntaxError(...)` guards keyed on
+            # cluster-specific stderr substrings ("...skylake/", "/4.8.2"); they aborted the whole
+            # run and matched unrelated output.
             outputs.append(result.stdout)
             errors.append(result.stderr)
 
@@ -663,18 +657,19 @@ def eval_script_ts(ts_path: Path, input_data, sconf: SubprocessConfig, **kwargs)
 
     runtime_name = check_js_runtime(kwargs["code"])
 
-    # install npm packages
-    result = install_npm_packages(sconf)
-
-    if result.exit_code is None or result.exit_code != 0:
-        return {
-            "status": Status.NPMFailed,
-            "exit_code": result.exit_code,
-            "stdout": [result.stdout],
-            "stderr": [result.stderr],
-        }
-
+    # genlm-eval edit: only node-style TS needs the npm @types and a tsc compile step. Deno
+    # resolves its own modules and runs the .ts directly, so the original unconditional `npm i`
+    # was pointless for deno code and turned a correct deno solution into NPMFailed when npm was
+    # absent. Skip both install and compile for deno.
     if runtime_name == "node":
+        result = install_npm_packages(sconf)
+        if result.exit_code is None or result.exit_code != 0:
+            return {
+                "status": Status.NPMFailed,
+                "exit_code": result.exit_code,
+                "stdout": [result.stdout],
+                "stderr": [result.stderr],
+            }
         # compile typescript to javascript
         # https://www.typescriptlang.org/docs/handbook/compiler-options.html
         result = run(
@@ -691,11 +686,9 @@ def eval_script_ts(ts_path: Path, input_data, sconf: SubprocessConfig, **kwargs)
             timeout_seconds=sconf.build_timeout,
             sconf=sconf,
         )
-    elif runtime_name == "deno":
-        # don't need to compile anything
-        pass
-
-    status = get_build_status(result)
+        status = get_build_status(result)
+    else:  # deno: nothing to install or compile
+        status = Status.BuildDone
 
     if status != Status.BuildDone:
         outputs.append(result.stdout)
@@ -1130,10 +1123,10 @@ def compile_and_run(code: str, input_data: List[str], sconf: SubprocessConfig):
         assert isinstance(result["stderr"], list)
         assert isinstance(result["status"], Status)
 
-        # genlm-eval edit: scoped to the unique per-call tempdir path (str(fname)), so it
-        # cannot match the launching shell (the CLAUDE.md exit-144 pkill footgun); guarded
-        # so a missing `pkill` binary does not crash the eval. kill_process() already
-        # SIGKILLs each run's process group; this is a belt-and-suspenders catch-all.
+        # genlm-eval edit: scoped to the unique per-call tempdir path (str(fname)) so a
+        # self-matching pkill cannot kill the launching shell; guarded so a missing `pkill`
+        # binary does not crash the eval. kill_process() already SIGKILLs each run's process
+        # group, so this is a belt-and-suspenders catch-all.
         try:
             subprocess.run(["pkill", "-f", str(fname)], check=False)
         except FileNotFoundError:
@@ -1425,9 +1418,9 @@ def match_tests_exact(
 
     The agnostics-framework executors compare `real_output.rstrip() != expected_output.rstrip()`
     once per test (all must pass). This is stricter than match_tests_groud_truth: no per-line
-    split, no True/False aliasing, no float tolerance. Used for Agnostics parity. Note that
-    code_outputs are already whitespace-stripped by compile_and_run, so a leading-whitespace
-    difference (which agnostics would keep) is not distinguished here.
+    split, no True/False aliasing, no float tolerance. Used for Agnostics parity. code_outputs
+    are already whitespace-stripped by compile_and_run, so a leading-whitespace difference
+    (which agnostics would keep) is not distinguished here.
     """
     all_results = []
     for prediction, gt_out in zip_longest(code_outputs, output_data, fillvalue=None):

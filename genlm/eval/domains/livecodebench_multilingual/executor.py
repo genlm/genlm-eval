@@ -23,7 +23,9 @@ _TOOLCHAIN: Dict[str, List[str]] = {
     "c#": ["mcs", "mono"],
     "go": ["go"],
     "javascript": ["node"],
-    "typescript": ["tsc", "node"],
+    # TS is graded Deno-native (fixtures and prompts target Deno, which runs .ts directly).
+    # node-style TS still grades if tsc/node/npm happen to be present, but deno is what we require.
+    "typescript": ["deno"],
     "rust": ["rustc"],
     "ruby": ["ruby"],
     "php": ["php"],
@@ -66,8 +68,7 @@ class LocalSubprocessExecutor:
     """Grade candidates by compiling/running them locally via the vendored executor.
 
     No container isolation: generated code runs as host subprocesses with only rlimit +
-    process-group SIGKILL. Run on a dedicated/disposable node only (see the plan's security
-    note).
+    process-group SIGKILL. Run on a dedicated/disposable node only.
     """
 
     def __init__(self, grading: str = "lenient") -> None:
@@ -105,8 +106,6 @@ class LocalSubprocessExecutor:
                 )
             except (OSError, subprocess.TimeoutExpired):
                 pass
-        # TypeScript needs a provisioned npm cache here (eval_script_ts runs `npm i` into a
-        # throwaway tempdir per candidate). Wired when TS is enabled.
         self._prepared.add(language)
 
     def run(

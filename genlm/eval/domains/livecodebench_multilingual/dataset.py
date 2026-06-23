@@ -1,14 +1,14 @@
-"""Dataset for multilingual LiveCodeBench (stdin/stdout problems only).
+"""Dataset and language registry for multilingual LiveCodeBench (stdin/stdout problems only).
 
-Reuses the existing LiveCodeBench loader/filters and forces ``testtypes=["stdin"]`` (no
-functional/LeetCode problems, no conversion). Each problem is tagged with a target
-``language``; one dataset is built per language. The raw ``question_id`` is preserved as its
-own field so cross-language grouping survives the composite ``instance_id`` (``<qid>@<lang>``).
+Reuses the existing LiveCodeBench loader and forces ``testtypes=["stdin"]``. The raw
+``question_id`` is kept as its own field so cross-language grouping survives the composite
+``instance_id`` (``<qid>@<lang>``).
 """
 
 from __future__ import annotations
 
-from typing import Any, Iterator, List, Mapping, Optional, Sequence, Type
+from dataclasses import dataclass
+from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Type
 
 from genlm.eval.core import Dataset
 from genlm.eval.domains.livecodebench.livecodebench import (
@@ -16,9 +16,121 @@ from genlm.eval.domains.livecodebench.livecodebench import (
     LiveCodeBenchInstance,
 )
 
-from .languages import resolve_language
-
 _STDIN_ONLY = ("stdin",)
+
+
+@dataclass(frozen=True)
+class Language:
+    key: str  # canonical eval_scripts key, e.g. "c++"
+    display: str  # name shown in the system message, e.g. "C++"
+    md_fence: str  # markdown code-fence tag, e.g. "cpp"
+    comment: str  # single-line comment token, e.g. "//"
+    tier: int  # 1 Multi-LCB, 2 low-resource, 3 high-risk
+    source: str  # "multilcb" | "agnostics"
+    prompt_nudge: str = ""  # appended guidance (low-resource langs only)
+
+
+# 12 Multi-LCB languages; display/md_fence/comment mirror lcb_runner.utils.PLang so prompts are
+# byte-identical to Multi-LCB (php's display is lowercase upstream, kept for parity).
+_MULTILCB = [
+    Language("python", "Python", "python", "#", 1, "multilcb"),
+    Language("c++", "C++", "cpp", "//", 1, "multilcb"),
+    Language("java", "Java", "java", "//", 1, "multilcb"),
+    Language("c#", "C#", "csharp", "//", 1, "multilcb"),
+    Language("go", "Go", "go", "//", 1, "multilcb"),
+    Language("javascript", "JavaScript", "javascript", "//", 1, "multilcb"),
+    Language("typescript", "TypeScript", "typescript", "//", 1, "multilcb"),
+    Language("rust", "Rust", "rust", "//", 1, "multilcb"),
+    Language("ruby", "Ruby", "ruby", "#", 1, "multilcb"),
+    Language("php", "php", "php", "//", 1, "multilcb"),
+    Language("kotlin", "Kotlin", "kotlin", "//", 1, "multilcb"),
+    Language("scala", "Scala", "scala", "//", 1, "multilcb"),
+]
+
+# 5 Agnostics low-resource languages (nudges paraphrased; Agnostics ships no license).
+_AGNOSTICS = [
+    Language(
+        "lua",
+        "Lua",
+        "lua",
+        "--",
+        2,
+        "agnostics",
+        prompt_nudge="Target Lua 5.1 / LuaJIT.",
+    ),
+    Language(
+        "julia",
+        "Julia",
+        "julia",
+        "#",
+        2,
+        "agnostics",
+        prompt_nudge="Target Julia 1.11.",
+    ),
+    Language(
+        "r",
+        "R",
+        "r",
+        "#",
+        2,
+        "agnostics",
+        prompt_nudge=(
+            'Target R 4. Read stdin with readLines(con = file("stdin")) (the optional n '
+            "argument limits how many lines are read) and write output with cat; do not use "
+            "print."
+        ),
+    ),
+    Language(
+        "ocaml",
+        "OCaml",
+        "ocaml",
+        "(*",
+        3,
+        "agnostics",
+        prompt_nudge=(
+            "Target OCaml 5 using the standard library for I/O (Scanf/Printf, read_line). "
+            "Remember the dotted float operators (+. -. *. /.), explicit int/float casts, "
+            "and that lists favour pattern matching or folds over indexing."
+        ),
+    ),
+    Language(
+        "fortran",
+        "Fortran",
+        "fortran",
+        "!",
+        2,
+        "agnostics",
+        prompt_nudge=(
+            "Target Fortran 90. Begin each scope with implicit none; arrays are 1-based; "
+            "read a size before allocating and reading an array; use real literals (e.g. "
+            "2.0d0) to avoid integer division; read inputs, compute, and write output only."
+        ),
+    ),
+]
+
+LANGUAGES: Dict[str, Language] = {lang.key: lang for lang in (_MULTILCB + _AGNOSTICS)}
+
+# Aliases accepted by resolve_language (canonical keys also resolve to themselves).
+_ALIASES = {
+    "cpp": "c++",
+    "cplusplus": "c++",
+    "csharp": "c#",
+    "cs": "c#",
+    "js": "javascript",
+    "ts": "typescript",
+    "golang": "go",
+}
+
+
+def resolve_language(name: str) -> "Language":
+    """Resolve a language name (case-insensitive, with aliases) to a Language; raises ValueError."""
+    key = name.strip().lower()
+    key = _ALIASES.get(key, key)
+    if key not in LANGUAGES:
+        raise ValueError(
+            f"unknown language {name!r}; known: {sorted(LANGUAGES)} (aliases: {sorted(_ALIASES)})"
+        )
+    return LANGUAGES[key]
 
 
 class MultilingualLCBInstance(LiveCodeBenchInstance):
@@ -70,7 +182,6 @@ class MultilingualLCBDataset(Dataset[MultilingualLCBInstance]):
         ``language`` is a per-run tag and is not stored, so one snapshot serves all
         languages; reload it with ``from_jsonl(path, language=...)``.
         """
-        # Delegate to the base writer over the same rows.
         LiveCodeBenchDataset(self._rows).to_jsonl(path)
 
     @classmethod
@@ -93,10 +204,8 @@ class MultilingualLCBDataset(Dataset[MultilingualLCBInstance]):
     ) -> "MultilingualLCBDataset":
         """Load stdin LiveCodeBench problems for ``language`` (testtypes forced to stdin).
 
-        The default ``start_date='2024-01-01'`` (inherited from the base loader) restricts the
-        contest window. To reproduce Multi-LCB's problem set exactly, pass the release/window
-        they used (e.g. ``start_date=None`` for the full ``release`` set, or their
-        contamination cutoff like ``start_date='2024-07-01'``).
+        ``start_date`` defaults to the base loader's ``2024-01-01``; pass the paper's window
+        (e.g. ``None`` or ``'2024-07-01'``) to match a specific problem set.
         """
         resolve_language(language)  # validate early
         base = LiveCodeBenchDataset.from_hf(

@@ -1,7 +1,7 @@
 """Executor-verified solution variants for the multilingual-LCB test matrix.
 
 Each variant was run through eval_plang_code once and confirmed to meet its contract; scala is
-unverified (no scalac on this machine). One canonical problem "sum-N".
+unverified (no scalac available during authoring). One canonical problem "sum-N".
 """
 
 # sum-N: line 1 = N, line 2 = N space-separated ints, output their sum.

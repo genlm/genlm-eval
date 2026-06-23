@@ -47,8 +47,7 @@ livecodebench = [
 ]
 
 # Multilingual LiveCodeBench: Python deps only. The per-language compilers/interpreters
-# (g++, rustc, node, ...) are system toolchains provisioned separately (see
-# MULTILINGUAL_LCB_PLAN.md), NOT pip-installable.
+# (g++, rustc, node, ...) are system toolchains provisioned separately, not pip-installable.
 livecodebench_multilingual = [
     "huggingface_hub>=0.20",
 ]

@@ -1,16 +1,8 @@
 """Evaluator for multilingual LiveCodeBench.
 
-Extracts the code block from a generation and grades it against the problem's shared
-stdin/stdout tests via a ``MultilingualCodeExecutor`` (default: local subprocess). Every
-language, including python, goes through the same path. Strict 0/1, with results memoized on
-(instance_id, code) since particle inference yields many identical samples.
-
-Grading matches the source papers: ``lenient`` is the Multi-LCB comparator (the default),
-``exact`` is Agnostics rstrip-equality. This is deliberately uniform across languages, so
-python here is graded leniently (True/true aliasing, 1e-5 float tolerance) rather than with the
-default-LCB exact-Decimal grader that genlm-rollouts uses. Consequence: multilingual-python
-pass@1 is >= the default-LCB/rollouts python number and is not directly comparable to that
-leaderboard. The gap is pinned in tests/test_mlcb_consistency.py.
+Extracts the code block from a generation and grades it against the problem's stdin/stdout
+tests via a ``MultilingualCodeExecutor``. Strict 0/1, memoized on (instance_id, code).
+``grading="lenient"`` is Multi-LCB's comparator; ``"exact"`` is Agnostics rstrip-equality.
 """
 
 from __future__ import annotations
@@ -64,14 +56,12 @@ class MultilingualLCBEvaluator(Evaluator[MultilingualLCBInstance]):
             io = json.loads(instance.eval_sample["input_output"])
             inputs, outputs = io["inputs"], io["outputs"]
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-            # A malformed or prompts-only eval_sample scores a failure rather than crashing
-            # the whole run (mirrors the guard in livecodebench/harness.py).
+            # Malformed/prompts-only eval_sample scores a failure rather than crashing the run.
             return EvaluationResult(
                 score=0.0, desc="malformed eval_sample", metadata=self._meta(instance)
             )
         if not inputs:
-            # A problem with no tests cannot be graded; score it a failure instead of
-            # reaching the empty-output crash in the vendored compile_and_run.
+            # No tests: score a failure instead of crashing in the vendored compile_and_run.
             return EvaluationResult(
                 score=0.0, desc="no test inputs", metadata=self._meta(instance)
             )
