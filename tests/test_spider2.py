@@ -1,17 +1,21 @@
 import asyncio
+import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 from genlm.control import direct_token_sampler, PromptedLLM
 
 from genlm.eval.core import EvaluationResult, ModelOutput, ModelResponse, run_evaluation
 from genlm.eval.domains.spider2 import (
+    backend_for_instance,
     Spider2Dataset,
     Spider2Evaluator,
     Spider2Instance,
     Spider2TableColumnVerifier,
     default_prompt_formatter,
 )
+from genlm.eval.domains.spider2.spider2_eval import evaluator as evaluator_mod
 
 
 @pytest.fixture
@@ -142,6 +146,238 @@ def test_run_evaluation(spider2_dataset, spider2_evaluator):
             assert isinstance(response, ModelOutput)
             for r in response.responses:
                 assert isinstance(r, ModelResponse)
+
+
+###################
+# Backend dispatch #
+###################
+
+
+def test_backend_for_instance():
+    assert backend_for_instance("local_concert_001") == "sqlite"
+    assert backend_for_instance("sf_bq001") == "snowflake"
+    assert backend_for_instance("sf123") == "snowflake"
+    assert backend_for_instance("bq001") == "bigquery"
+    assert backend_for_instance("ga004") == "bigquery"
+
+
+def _write_jsonl(path, rows):
+    path.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+
+
+def _row(instance_id):
+    return {
+        "instance_id": instance_id,
+        "db": "d",
+        "question": "q",
+        "external_knowledge": None,
+    }
+
+
+def test_default_filter_includes_snowflake_skips_bigquery(tmp_path):
+    _write_jsonl(
+        tmp_path / "spider2-lite.jsonl",
+        [_row("local_x"), _row("sf_bq_x"), _row("bq_x")],
+    )
+
+    ds = Spider2Dataset.from_spider2_dir(tmp_path)
+    assert {inst.spider2_instance_id for inst in ds} == {"local_x", "sf_bq_x"}
+
+    ds_sqlite = Spider2Dataset.from_spider2_dir(tmp_path, enabled_backends=("sqlite",))
+    assert {inst.spider2_instance_id for inst in ds_sqlite} == {"local_x"}
+
+
+def test_snowflake_dispatch(tmp_path, monkeypatch):
+    cred = tmp_path / "snowflake_credential.json"
+    cred.write_text(
+        json.dumps({"account": "a", "username": "u", "password": "p"}),
+        encoding="utf-8",
+    )
+
+    def fake_execute_snowflake(credential, query, timeout=None):
+        values = [1, 2, 3] if "good" in query else [9]
+        return pd.DataFrame({"c": values})
+
+    monkeypatch.setattr(evaluator_mod, "execute_snowflake", fake_execute_snowflake)
+
+    evaluator = Spider2Evaluator(tmp_path, snowflake_credential_path=cred).evaluator
+
+    ok, reason, _ = evaluator.evaluate("SELECT good", "SELECT good", "d", "sf_bq001")
+    assert ok and reason is None
+
+    ok, reason, _ = evaluator.evaluate("SELECT bad", "SELECT good", "d", "sf_bq001")
+    assert not ok and reason == "mismatch"
+
+
+def test_snowflake_missing_credentials(tmp_path):
+    evaluator = Spider2Evaluator(tmp_path).evaluator
+    ok, reason, _ = evaluator.evaluate("SELECT 1", "SELECT 1", "d", "sf_bq001")
+    assert not ok and reason == "missing snowflake credentials"
+
+
+def test_bigquery_missing_project(tmp_path):
+    # BigQuery is opt-in: with no project configured it is not executed.
+    evaluator = Spider2Evaluator(tmp_path).evaluator
+    ok, reason, _ = evaluator.evaluate("SELECT 1", "SELECT 1", "d", "bq001")
+    assert not ok and reason == "missing bigquery project"
+
+
+def test_bigquery_dispatch(tmp_path, monkeypatch):
+    def fake_execute_bigquery(client, query, timeout=None):
+        values = [1, 2, 3] if "good" in query else [9]
+        return pd.DataFrame({"c": values})
+
+    monkeypatch.setattr(evaluator_mod, "execute_bigquery", fake_execute_bigquery)
+
+    evaluator = Spider2Evaluator(tmp_path, bigquery_project="proj").evaluator
+    # Stub the client builder so no Google library import is needed.
+    monkeypatch.setattr(evaluator, "_get_bigquery_client", lambda: object())
+
+    ok, reason, _ = evaluator.evaluate("SELECT good", "SELECT good", "d", "bq001")
+    assert ok and reason is None
+
+    ok, reason, _ = evaluator.evaluate("SELECT bad", "SELECT good", "d", "bq001")
+    assert not ok and reason == "mismatch"
+
+
+def test_evaluate_defaults_to_sqlite(tmp_path):
+    # instance_id=None -> sqlite backend; missing db surfaces the sqlite reason.
+    evaluator = Spider2Evaluator(tmp_path).evaluator
+    ok, reason, _ = evaluator.evaluate("SELECT 1", "SELECT 1", "nodb", instance_id=None)
+    assert not ok and reason == "missing sqlite database `nodb`"
+
+
+########################
+# execute_snowflake    #
+########################
+
+
+def test_execute_snowflake_connection_and_dataframe(monkeypatch):
+    """Exercise the real ``execute_snowflake`` body with a fake connector module."""
+    import sys
+    import types
+
+    captured = {}
+
+    class FakeCursor:
+        description = [("a",), ("b",)]
+
+        def execute(self, query):
+            captured["query"] = query
+
+        def fetchall(self):
+            return [(1, "x"), (2, "y")]
+
+    class FakeConn:
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            captured["closed"] = True
+
+    def fake_connect(**kwargs):
+        captured["connect"] = kwargs
+        return FakeConn()
+
+    fake_pkg = types.ModuleType("snowflake")
+    fake_mod = types.ModuleType("snowflake.connector")
+    fake_mod.connect = fake_connect
+    fake_pkg.connector = fake_mod
+    monkeypatch.setitem(sys.modules, "snowflake", fake_pkg)
+    monkeypatch.setitem(sys.modules, "snowflake.connector", fake_mod)
+
+    credential = {
+        "account": "ACC",
+        "username": "USER",
+        "password": "TOK",
+        "role": "PARTICIPANT",
+        "warehouse": "WH",
+    }
+    df = evaluator_mod.execute_snowflake(credential, "SELECT 1", timeout=30)
+
+    # username -> user; role/warehouse forwarded; timeout -> login_timeout.
+    assert captured["connect"] == {
+        "account": "ACC",
+        "user": "USER",
+        "password": "TOK",
+        "role": "PARTICIPANT",
+        "warehouse": "WH",
+        "login_timeout": 30,
+    }
+    assert captured["query"] == "SELECT 1"
+    assert captured["closed"] is True
+    assert list(df.columns) == ["a", "b"]
+    assert df["a"].tolist() == [1, 2]
+
+
+########################
+# Result comparison    #
+########################
+
+
+def test_compare_identical_and_numeric_tolerance():
+    gold = pd.DataFrame({"x": [1.0, 2.0]})
+    assert evaluator_mod.compare_pandas_table(gold.copy(), gold)
+    assert evaluator_mod.compare_pandas_table(pd.DataFrame({"x": [1.005, 2.0]}), gold)
+    assert not evaluator_mod.compare_pandas_table(pd.DataFrame({"x": [1.5, 2.0]}), gold)
+
+
+def test_compare_ignore_order():
+    gold = pd.DataFrame({"x": [1, 2, 3]})
+    pred = pd.DataFrame({"x": [3, 1, 2]})
+    assert evaluator_mod.compare_pandas_table(pred, gold, ignore_order=True)
+    assert not evaluator_mod.compare_pandas_table(pred, gold, ignore_order=False)
+
+
+def test_compare_extra_and_missing_columns():
+    gold = pd.DataFrame({"x": [1, 2]})
+    # An extra predicted column is fine as long as every gold column is matched.
+    assert evaluator_mod.compare_pandas_table(
+        pd.DataFrame({"x": [1, 2], "y": [9, 9]}), gold
+    )
+    # Fewer predicted columns than gold -> fail.
+    gold2 = pd.DataFrame({"x": [1, 2], "z": [3, 4]})
+    assert not evaluator_mod.compare_pandas_table(pd.DataFrame({"x": [1, 2]}), gold2)
+
+
+def test_compare_condition_cols():
+    gold = pd.DataFrame({"keep": [1, 2], "ignore": [5, 6]})
+    pred = pd.DataFrame({"keep": [1, 2]})
+    # Only gold column 0 is required when condition_cols is set.
+    assert evaluator_mod.compare_pandas_table(pred, gold, condition_cols=[0])
+    # Without it, gold's second column is unmatched -> fail.
+    assert not evaluator_mod.compare_pandas_table(pred, gold)
+
+
+########################
+# Gold / config loaders #
+########################
+
+
+def test_load_gold_results_matches_variants(tmp_path):
+    (tmp_path / "sf_bq001.csv").write_text("a\n1\n", encoding="utf-8")
+    (tmp_path / "sf_bq001_a.csv").write_text("a\n2\n", encoding="utf-8")
+    (tmp_path / "sf_bq002.csv").write_text("a\n3\n", encoding="utf-8")
+
+    results = evaluator_mod.load_gold_results(tmp_path, "sf_bq001")
+    assert len(results) == 2
+    assert sorted(int(r["a"].iloc[0]) for r in results) == [1, 2]
+    # A missing directory yields no results rather than raising.
+    assert evaluator_mod.load_gold_results(tmp_path / "nope", "sf_bq001") == []
+
+
+def test_load_eval_configs(tmp_path):
+    path = tmp_path / "cfg.jsonl"
+    path.write_text(
+        json.dumps(
+            {"instance_id": "sf_bq001", "condition_cols": [0, 2], "ignore_order": False}
+        )
+        + "\n\n",  # trailing blank line should be skipped
+        encoding="utf-8",
+    )
+    cfgs = evaluator_mod.load_eval_configs(path)
+    assert cfgs["sf_bq001"].condition_cols == [0, 2]
+    assert cfgs["sf_bq001"].ignore_order is False
 
 
 @pytest.fixture

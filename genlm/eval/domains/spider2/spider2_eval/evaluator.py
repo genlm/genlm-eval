@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from .utils import StrPath
+from .utils import StrPath, backend_for_instance
 
 
 _TOLERANCE = 1e-2
@@ -83,6 +83,51 @@ def execute_sqlite(sqlite_path: StrPath, query: str, timeout: Optional[float] = 
         return pd.read_sql_query(query, conn)
 
 
+def execute_snowflake(
+    credential: Dict[str, Any], query: str, timeout: Optional[float] = None
+) -> pd.DataFrame:
+    """Execute ``query`` against Snowflake and return the result.
+
+    Spider 2.0-Lite gold/predicted SQL is fully qualified
+    (``DATABASE.SCHEMA.TABLE``), so the connection only needs the participant
+    ``role`` and ``warehouse`` from ``snowflake_credential.json`` -- no
+    per-database ``USE`` is required.
+    """
+    import snowflake.connector
+
+    connect_kwargs: Dict[str, Any] = {
+        "account": credential["account"],
+        "user": credential["username"],
+        "password": credential["password"],
+    }
+    for key in ("role", "warehouse"):
+        if credential.get(key):
+            connect_kwargs[key] = credential[key]
+    if timeout is not None:
+        connect_kwargs["login_timeout"] = timeout
+
+    conn = snowflake.connector.connect(**connect_kwargs)
+    try:
+        cur = conn.cursor()
+        cur.execute(query)
+        rows = cur.fetchall()
+        columns = [c[0] for c in cur.description]
+        return pd.DataFrame(rows, columns=columns)
+    finally:
+        conn.close()
+
+
+def execute_bigquery(client, query: str, timeout: Optional[float] = None) -> pd.DataFrame:
+    """Execute ``query`` against BigQuery and return the result.
+
+    ``client`` is a ``google.cloud.bigquery.Client`` (built lazily by the
+    evaluator so this module imports no Google libraries at import time).
+    """
+    job = client.query(query)
+    result = job.result(timeout=timeout)
+    return result.to_dataframe(create_bqstorage_client=False)
+
+
 @dataclass
 class Spider2EvalConfig:
     """Per-instance settings from ``spider2lite_eval.jsonl``."""
@@ -136,7 +181,7 @@ def load_gold_results(exec_result_dir: StrPath, instance_id: str) -> List[pd.Dat
 
 
 class Evaluator:
-    """Spider 2.0-Lite execution-based evaluator (SQLite backend)."""
+    """Spider 2.0-Lite execution-based evaluator (SQLite + Snowflake backends)."""
 
     def __init__(
         self,
@@ -144,6 +189,9 @@ class Evaluator:
         sqlite_dir: Optional[StrPath] = None,
         exec_result_dir: Optional[StrPath] = None,
         eval_config_path: Optional[StrPath] = None,
+        snowflake_credential_path: Optional[StrPath] = None,
+        bigquery_project: Optional[str] = None,
+        bigquery_credential_path: Optional[StrPath] = None,
         timeout: Optional[float] = None,
     ):
         spider2_dir = Path(spider2_dir)
@@ -153,6 +201,19 @@ class Evaluator:
             if sqlite_dir is not None
             else spider2_dir / "resource" / "databases" / "spider2-localdb"
         )
+
+        if snowflake_credential_path is None:
+            default_cred = spider2_dir / "evaluation_suite" / "snowflake_credential.json"
+            snowflake_credential_path = default_cred if default_cred.exists() else None
+        self.snowflake_credential_path = snowflake_credential_path
+        self._snowflake_credential: Optional[Dict[str, Any]] = None
+
+        # BigQuery is opt-in: it executes only when a project is configured.
+        # With no explicit credential file it falls back to Application Default
+        # Credentials (``gcloud auth application-default login``).
+        self.bigquery_project = bigquery_project
+        self.bigquery_credential_path = bigquery_credential_path
+        self._bigquery_client = None
         self.exec_result_dir = (
             Path(exec_result_dir)
             if exec_result_dir is not None
@@ -172,6 +233,51 @@ class Evaluator:
     def _sqlite_path(self, db_name: str) -> Path:
         return self.sqlite_dir / f"{db_name}.sqlite"
 
+    def _get_snowflake_credential(self) -> Dict[str, Any]:
+        if self._snowflake_credential is None:
+            path = self.snowflake_credential_path
+            if path is None or not Path(path).exists():
+                raise FileNotFoundError("snowflake credential file not found")
+            with open(path, encoding="utf-8") as f:
+                self._snowflake_credential = json.load(f)
+        return self._snowflake_credential
+
+    def _get_bigquery_client(self):
+        if self._bigquery_client is None:
+            from google.cloud import bigquery
+
+            if self.bigquery_credential_path is not None:
+                self._bigquery_client = bigquery.Client.from_service_account_json(
+                    str(self.bigquery_credential_path), project=self.bigquery_project
+                )
+            else:  # Application Default Credentials
+                self._bigquery_client = bigquery.Client(project=self.bigquery_project)
+        return self._bigquery_client
+
+    def _runner(self, backend: str, db_name: str):
+        """Return a ``query -> DataFrame`` callable for ``backend``.
+
+        Returns ``(runner, None)`` on success or ``(None, reason)`` when the
+        backend is unavailable (missing DB / credentials / not enabled).
+        """
+        if backend == "sqlite":
+            sqlite_path = self._sqlite_path(db_name)
+            if not sqlite_path.exists():
+                return None, f"missing sqlite database `{db_name}`"
+            return (lambda q: execute_sqlite(sqlite_path, q, timeout=self.timeout)), None
+        if backend == "snowflake":
+            try:
+                credential = self._get_snowflake_credential()
+            except FileNotFoundError:
+                return None, "missing snowflake credentials"
+            return (lambda q: execute_snowflake(credential, q, timeout=self.timeout)), None
+        if backend == "bigquery":
+            if self.bigquery_project is None:
+                return None, "missing bigquery project"
+            client = self._get_bigquery_client()
+            return (lambda q: execute_bigquery(client, q, timeout=self.timeout)), None
+        return None, f"backend `{backend}` not enabled"
+
     def evaluate(
         self,
         pred: str,
@@ -187,12 +293,13 @@ class Evaluator:
         * ``mismatch`` if it executes but disagrees with every gold result
         * ``None`` when the prediction is correct
         """
-        sqlite_path = self._sqlite_path(db_name)
-        if not sqlite_path.exists():
-            return False, f"missing sqlite database `{db_name}`", None
+        backend = backend_for_instance(instance_id) if instance_id else "sqlite"
+        run, reason = self._runner(backend, db_name)
+        if run is None:
+            return False, reason, None
 
         try:
-            pred_df = execute_sqlite(sqlite_path, pred, timeout=self.timeout)
+            pred_df = run(pred)
         except Exception:
             return False, "invalid", None
 
@@ -211,7 +318,7 @@ class Evaluator:
         )
         if not gold_dfs and gold:
             try:
-                gold_dfs = [execute_sqlite(sqlite_path, gold, timeout=self.timeout)]
+                gold_dfs = [run(gold)]
             except Exception:
                 return False, "missing gold execution", None
 

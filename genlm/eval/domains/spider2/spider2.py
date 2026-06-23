@@ -10,7 +10,7 @@ from .spider2_eval.dialogue import (
 )
 from .spider2_eval.evaluator import Evaluator as BaseSpider2Evaluator
 from .spider2_eval.schema import load_schemas
-from .spider2_eval.utils import serialize_schema
+from .spider2_eval.utils import backend_for_instance, serialize_schema
 
 from genlm.eval.core import Dataset, EvaluationResult, Evaluator, Instance
 from genlm.eval.util import chat_template_messages
@@ -120,6 +120,7 @@ class Spider2Dataset(Dataset[Spider2Instance]):
         grammar_json_path=None,
         train_jsonl_path=None,
         instance_filter=None,
+        enabled_backends=("sqlite", "snowflake"),
         **kwargs,
     ):
         """Build a dataset from a Spider 2.0-Lite checkout.
@@ -130,9 +131,12 @@ class Spider2Dataset(Dataset[Spider2Instance]):
                 ``db -> lark grammar`` (mirrors Spider 1's ``grammars.json``).
             train_jsonl_path: Optional path to a separate JSONL with training /
                 few-shot instances.  Defaults to the dev JSONL when omitted.
-            instance_filter: Optional callable ``instance_id -> bool``.  By
-                default we keep instances whose ids start with ``local`` since
-                those are SQLite-backed and runnable end-to-end.
+            instance_filter: Optional callable ``instance_id -> bool``.  When
+                omitted, instances are kept iff their backend (derived from the
+                id prefix) is in ``enabled_backends``.
+            enabled_backends: Backends to include when ``instance_filter`` is
+                ``None``.  Defaults to SQLite + Snowflake; ``bigquery`` is
+                excluded since it is not executed yet.
         """
         raw_spider2_dir = Path(raw_spider2_dir)
         dev_jsonl = raw_spider2_dir / "spider2-lite.jsonl"
@@ -140,7 +144,8 @@ class Spider2Dataset(Dataset[Spider2Instance]):
         documents_dir = raw_spider2_dir / "resource" / "documents"
 
         if instance_filter is None:
-            instance_filter = lambda iid: iid.startswith("local")  # noqa: E731
+            enabled = set(enabled_backends)
+            instance_filter = lambda iid: backend_for_instance(iid) in enabled  # noqa: E731
 
         dev_data = load_spider2_data(
             dev_jsonl, gold_sql_dir=gold_sql_dir, instance_filter=instance_filter
@@ -155,10 +160,19 @@ class Spider2Dataset(Dataset[Spider2Instance]):
         else:
             train_data = list(dev_data)
 
-        spider2_schemas = load_schemas(
-            schemas_dir=raw_spider2_dir / "resource" / "databases" / "sqlite",
-            sqlite_db_dir=raw_spider2_dir / "resource" / "databases" / "spider2-localdb",
-        )
+        # Schemas live under ``resource/databases/{backend}/{db}/DDL.csv`` for
+        # each backend; ``spider2-localdb`` instead holds the ``.sqlite`` files
+        # and is used to introspect SQLite columns, not as a schema root.
+        db_root = raw_spider2_dir / "resource" / "databases"
+        localdb_dir = db_root / "spider2-localdb"
+        spider2_schemas = {}
+        if db_root.exists():
+            for sub in sorted(db_root.iterdir()):
+                if not sub.is_dir() or sub.name == "spider2-localdb":
+                    continue
+                spider2_schemas.update(
+                    load_schemas(schemas_dir=sub, sqlite_db_dir=localdb_dir)
+                )
 
         if grammar_json_path is None:
             grammars = None
@@ -221,6 +235,9 @@ class Spider2Evaluator(Evaluator[Spider2Instance]):
         sqlite_dir=None,
         exec_result_dir=None,
         eval_config_path=None,
+        snowflake_credential_path=None,
+        bigquery_project=None,
+        bigquery_credential_path=None,
         evaluator_timeout=None,
     ):
         self.raw_spider2_dir = Path(raw_spider2_dir)
@@ -229,6 +246,9 @@ class Spider2Evaluator(Evaluator[Spider2Instance]):
             sqlite_dir=sqlite_dir,
             exec_result_dir=exec_result_dir,
             eval_config_path=eval_config_path,
+            snowflake_credential_path=snowflake_credential_path,
+            bigquery_project=bigquery_project,
+            bigquery_credential_path=bigquery_credential_path,
             timeout=evaluator_timeout,
         )
 

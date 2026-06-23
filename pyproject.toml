@@ -36,6 +36,9 @@ spider2 = [
     "jsons",
     "lark",
     "rapidfuzz",
+    "snowflake-connector-python[pandas]",
+    "google-cloud-bigquery",
+    "db-dtypes",
 ]
 
 molecules = [
