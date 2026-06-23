@@ -822,7 +822,7 @@ def test_concurrent_grading_no_crosstalk():
 
 # ---- differential: agreement with upstream Multi-LCB executor ----
 
-_MULTI_LCB = Path(__file__).resolve().parents[1] / "Multi-LCB"
+_MULTI_LCB = Path(__file__).resolve().parents[1].parent / "Multi-LCB"
 
 
 def _load_upstream():
