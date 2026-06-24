@@ -1,4 +1,4 @@
-# Pinned conda env with the per-language toolchains for multilingual LiveCodeBench: the 12
+# Pinned conda env with the per-language toolchains for multilingual LiveCodeBench: the 11
 # Multi-LCB languages plus the Agnostics low-resource ones (lua/julia/r/ocaml/fortran).
 #
 # Create: conda env create -f docs/cookbook/domains/livecodebench_multilingual.environment.yml
@@ -6,7 +6,6 @@
 #         resolve their binary via $CONDA_PREFIX), keeping the genlm-eval python as interpreter:
 #           P=$(conda run -n mlcb-tools printenv CONDA_PREFIX)
 #           PATH="$P/bin:$PATH" CONDA_PREFIX="$P" /path/to/genlm-env/bin/python -m ...
-# scala is not on conda-forge; install it separately (coursier or SDKMAN) and add it to PATH.
 name: mlcb-tools
 channels:
   - conda-forge
@@ -20,9 +19,6 @@ dependencies:
   - openjdk>=23             # javac / java  (also runs kotlin jars)
   - mono>=6.12              # mcs / mono  (c#)
   - kotlin>=2.2             # kotlinc
-  # scala (scalac / scala) is not on conda-forge; install it separately, e.g.
-  #   curl -fL https://github.com/coursier/coursier/releases/latest/download/cs-x86_64-pc-linux.gz | gzip -d > cs && chmod +x cs && ./cs setup --jvm system --apps scala,scalac
-  # or via SDKMAN (sdk install scala). Then put scalac/scala on PATH for the eval.
   # interpreters
   - ruby>=3.4
   - php>=8.1

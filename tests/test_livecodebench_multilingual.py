@@ -43,9 +43,9 @@ STDIN_QIDS = ["abc333_a", "abc387_a"]
 # ---- language registry ----
 
 
-def test_registry_has_17_languages():
-    assert len(LANGUAGES) == 17
-    assert sum(1 for v in LANGUAGES.values() if v.source == "multilcb") == 12
+def test_registry_has_16_languages():
+    assert len(LANGUAGES) == 16
+    assert sum(1 for v in LANGUAGES.values() if v.source == "multilcb") == 11
     assert sum(1 for v in LANGUAGES.values() if v.source == "agnostics") == 5
 
 
@@ -114,7 +114,6 @@ _PLANG_DISPLAY = {
     "go": "Go",
     "ruby": "Ruby",
     "php": "php",
-    "scala": "Scala",
     "kotlin": "Kotlin",
 }
 _PLANG_FENCE = {"c++": "cpp", "c#": "csharp"}  # others: fence name == key
@@ -370,7 +369,7 @@ def test_prepare_raises_for_missing_toolchain():
         LocalSubprocessExecutor().prepare(missing)
 
 
-def test_all_17_languages_wired_in_executor():
+def test_all_16_languages_wired_in_executor():
     for lang in LANGUAGES:
         assert lang in testing_plang.eval_scripts, f"{lang} not wired"
 
@@ -604,10 +603,6 @@ SUM_SOLUTIONS = {
     "typescript": (
         "deno",
         "```typescript\nconst data = await new Response(Deno.stdin.readable).text();\nconst [a,b]=data.trim().split(/\\s+/).map(Number);\nconsole.log(a+b);\n```",
-    ),
-    "scala": (
-        "scalac",
-        '```scala\nobject Main{def main(args:Array[String]):Unit={val Array(a,b)=scala.io.StdIn.readLine().trim.split(" ").map(_.toLong);println(a+b)}}\n```',
     ),
 }
 

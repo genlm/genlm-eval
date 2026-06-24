@@ -1,7 +1,7 @@
 """Executor-verified solution variants for the multilingual-LCB test matrix.
 
-Each variant was run through eval_plang_code once and confirmed to meet its contract; scala is
-unverified (no scalac available during authoring). One canonical problem "sum-N".
+Each variant was run through eval_plang_code once and confirmed to meet its contract. One
+canonical problem "sum-N".
 """
 
 # sum-N: line 1 = N, line 2 = N space-separated ints, output their sum.
@@ -91,13 +91,6 @@ SOLUTIONS = {
         "partial": "import java.io.BufferedReader\nimport java.io.InputStreamReader\nimport java.util.StringTokenizer\n\nfun main() {\n    val br = BufferedReader(InputStreamReader(System.`in`))\n    val n = br.readLine().trim().toInt()\n    var sum = 0L\n    var read = 0\n    while (read < n) {\n        val st = StringTokenizer(br.readLine())\n        while (st.hasMoreTokens() && read < n) {\n            sum += st.nextToken().toLong()\n            read++\n        }\n    }\n    if (n == 4) {\n        println(sum + 1)\n    } else {\n        println(sum)\n    }\n}\n",
         "runtime_error": "import java.io.BufferedReader\nimport java.io.InputStreamReader\n\nfun main() {\n    val br = BufferedReader(InputStreamReader(System.`in`))\n    val n = br.readLine().trim().toInt()\n    val arr = IntArray(0)\n    var sum = 0L\n    for (i in 0 until n) {\n        sum += arr[i].toLong()\n    }\n    println(sum)\n}\n",
         "compile_error": "import java.io.BufferedReader\nimport java.io.InputStreamReader\n\nfun main() {\n    val br = BufferedReader(InputStreamReader(System.`in`))\n    val n = br.readLine().trim().toInt()\n    var sum = 0L\n    // missing closing brace and broken syntax below\n    for (i in 0 until n\n        sum += 1\n    println(sum)\n",
-    },
-    "scala": {
-        "correct": 'object Main {\n  def main(args: Array[String]): Unit = {\n    val tokens = io.Source.stdin.mkString.split("\\\\s+").filter(_.nonEmpty)\n    val n = tokens(0).toInt\n    var sum: Long = 0L\n    var i = 1\n    while (i <= n) {\n      sum += tokens(i).toLong\n      i += 1\n    }\n    println(sum)\n  }\n}\n',
-        "wrong_output": 'object Main {\n  def main(args: Array[String]): Unit = {\n    val tokens = io.Source.stdin.mkString.split("\\\\s+").filter(_.nonEmpty)\n    val n = tokens(0).toInt\n    var sum: Long = 0L\n    var i = 1\n    while (i <= n) {\n      sum += tokens(i).toLong\n      i += 1\n    }\n    println(sum + 1L)\n  }\n}\n',
-        "partial": 'object Main {\n  def main(args: Array[String]): Unit = {\n    val tokens = io.Source.stdin.mkString.split("\\\\s+").filter(_.nonEmpty)\n    val n = tokens(0).toInt\n    var sum: Long = 0L\n    var i = 1\n    while (i <= n) {\n      sum += tokens(i).toLong\n      i += 1\n    }\n    if (n == 4) println(sum + 1L) else println(sum)\n  }\n}\n',
-        "runtime_error": "object Main {\n  def main(args: Array[String]): Unit = {\n    val empty = Array.empty[Long]\n    val boom = empty(0)\n    println(boom)\n  }\n}\n",
-        "compile_error": 'object Main {\n  def main(args: Array[String]): Unit = {\n    val tokens = io.Source.stdin.mkString.split("\\\\s+")\n    val n = tokens(0).toInt\n    var sum: Long = 0L\n    @@@ this is not valid scala @@@\n    println(sum)\n  // missing closing brace for main and object\n}\n',
     },
     "lua": {
         "correct": 'local n = tonumber(io.read("*l"))\nlocal line = io.read("*l")\nlocal sum = 0LL\nfor tok in line:gmatch("%-?%d+") do\n  sum = sum + (0LL + tonumber(tok))\nend\nprint((tostring(sum):gsub("LL$", "")))\n',

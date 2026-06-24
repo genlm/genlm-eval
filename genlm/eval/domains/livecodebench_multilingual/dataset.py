@@ -30,8 +30,9 @@ class Language:
     prompt_nudge: str = ""  # appended guidance (low-resource langs only)
 
 
-# 12 Multi-LCB languages; display/md_fence/comment mirror lcb_runner.utils.PLang so prompts are
-# byte-identical to Multi-LCB (php's display is lowercase upstream, kept for parity).
+# 11 Multi-LCB languages; display/md_fence/comment mirror lcb_runner.utils.PLang so prompts are
+# byte-identical to Multi-LCB (php's display is lowercase upstream, kept for parity). scala is
+# omitted: its JVM runtime exceeds the executor's RLIMIT_AS, so no program runs under the sandbox.
 _MULTILCB = [
     Language("python", "Python", "python", "#", 1, "multilcb"),
     Language("c++", "C++", "cpp", "//", 1, "multilcb"),
@@ -44,7 +45,6 @@ _MULTILCB = [
     Language("ruby", "Ruby", "ruby", "#", 1, "multilcb"),
     Language("php", "php", "php", "//", 1, "multilcb"),
     Language("kotlin", "Kotlin", "kotlin", "//", 1, "multilcb"),
-    Language("scala", "Scala", "scala", "//", 1, "multilcb"),
 ]
 
 # 5 Agnostics low-resource languages (nudges paraphrased; Agnostics ships no license).

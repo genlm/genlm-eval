@@ -27,7 +27,6 @@ _TOOLCHAIN: Dict[str, List[str]] = {
     "ruby": ["ruby"],
     "php": ["php"],
     "kotlin": ["kotlinc", "java"],
-    "scala": ["scalac", "scala"],
     "lua": ["luajit"],
     "julia": ["julia"],
     "r": ["Rscript"],
