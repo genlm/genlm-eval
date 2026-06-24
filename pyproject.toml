@@ -115,7 +115,5 @@ extend-exclude = [
 # tests/ on the path so `from fixtures.* import ...` resolves regardless of invocation cwd.
 pythonpath = ["tests"]
 markers = [
-    "toolchain: needs a language compiler/interpreter on PATH (skips if absent)",
-    "gpu: needs a CUDA GPU (opt-in via GENLM_GPU_TEST=1)",
     "differential: needs the ../Multi-LCB repo for differential grading",
 ]
