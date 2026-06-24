@@ -177,11 +177,8 @@ class MultilingualLCBDataset(Dataset[MultilingualLCBInstance]):
         return MultilingualLCBInstance
 
     def to_jsonl(self, path) -> None:
-        """Write the (stdin-only) rows as a language-independent snapshot.
-
-        ``language`` is a per-run tag and is not stored, so one snapshot serves all
-        languages; reload it with ``from_jsonl(path, language=...)``.
-        """
+        """Write the stdin rows as a language-independent snapshot (language is a per-run tag,
+        not stored; reload with ``from_jsonl(path, language=...)``)."""
         LiveCodeBenchDataset(self._rows).to_jsonl(path)
 
     @classmethod

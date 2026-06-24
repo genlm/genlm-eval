@@ -26,8 +26,7 @@ class MultilingualLCBEvaluator(Evaluator[MultilingualLCBInstance]):
         grading: str = "lenient",
     ):
         self.timeout_seconds = float(timeout_seconds)
-        # grading selects the default executor's comparator ("lenient" = Multi-LCB,
-        # "exact" = Agnostics rstrip-equality); ignored if a custom executor is passed.
+        # grading picks the default executor's comparator; ignored if a custom executor is passed.
         self.executor = executor or LocalSubprocessExecutor(grading=grading)
         self.max_log_chars = int(max_log_chars)
         self._cache: Dict[Tuple[Any, str], Tuple[bool, Dict[str, Any]]] = {}

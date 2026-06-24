@@ -39,10 +39,8 @@ _PLACEHOLDER_RE = re.compile(
 def extract_code(model_output) -> str:
     """First fenced code block, matching Multi-LCB's extractor.
 
-    Drops a leading </think> reasoning span, takes the first ``` block, and strips the
-    "YOUR CODE HERE" placeholder (any comment token). Differs from the official-lcb_runner
-    extractor used by the Python-only domain (which takes the last block and keeps the
-    placeholder). Source: Multi-LCB lcb_runner/utils/extraction_utils.py:51.
+    Drops a leading </think> span, takes the first ``` block, and strips the "YOUR CODE HERE"
+    placeholder. The Python-only domain's extractor takes the last block and keeps the placeholder.
     """
     if not model_output:
         return ""
@@ -67,8 +65,7 @@ def _system_message(lang: Language) -> str:
 def _user_body(question_content: str, lang: Language) -> str:
     """Multi-LCB get_enhanced_question_template_answer, no-starter (stdin) branch."""
     body = f"### Question:\n{question_content}\n\n"
-    # Trailing newline matches Multi-LCB: the FORMATTING constant ends with "\n\n" and
-    # code_generation.py appends one more "\n" before the code fence (3 newlines total).
+    # Trailing newline matches Multi-LCB byte-for-byte (FORMATTING ends with "\n\n", plus one more).
     body += f"### Format: {FORMATTING_WITHOUT_STARTER_CODE.format(md_fence=lang.md_fence)}\n"
     body += f"```{lang.md_fence}\n{lang.comment} YOUR CODE HERE\n```\n\n"
     body += "### Answer: (use the provided format with backticks)\n\n"
@@ -85,11 +82,10 @@ def multilingual_chat_messages(instance) -> List[Dict[str, str]]:
 
 
 def agnostics_chat_messages(instance) -> List[Dict[str, str]]:
-    """Agnostics Ag-LCB-X eval prompt: a single user message naming the target language.
+    """Agnostics Ag-LCB-X eval prompt: one user message naming the target language.
 
     Mirrors agnostics-framework make_prompt_from_lcbx_row (a "# Problem / # Task" block, no
-    system message and no language tips, since Agnostics drops the learning-aid prefix at
-    eval). Pair with grading="exact" for an Agnostics-parity run.
+    system message). Pair with grading="exact" for an Agnostics-parity run.
     """
     lang = resolve_language(instance.language)
     user = (

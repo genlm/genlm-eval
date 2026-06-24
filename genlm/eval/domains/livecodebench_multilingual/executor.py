@@ -1,9 +1,7 @@
 """Execution backends for multilingual LiveCodeBench.
 
-A backend grades one (code, language) candidate against shared stdin/stdout tests. The only
-backend so far is ``LocalSubprocessExecutor``, which wraps the vendored Multi-LCB executor
-(``testing_plang.eval_plang_code``). A future container backend can implement the same
-protocol.
+A backend grades one (code, language) candidate against shared stdin/stdout tests.
+``LocalSubprocessExecutor`` wraps the vendored Multi-LCB executor (``eval_plang_code``).
 """
 
 import shutil
@@ -13,9 +11,8 @@ from typing import Any, Dict, List, Protocol, Tuple
 
 from .vendored import testing_plang as _tp
 
-# Binaries each language needs on PATH at compile/run time. Probed so a missing toolchain
-# fails fast with a clear message instead of a cryptic FileNotFoundError from Popen. "python"
-# is the running interpreter (always present), so it has no probe.
+# Binaries each language needs on PATH, probed so a missing toolchain fails fast with a clear
+# message. python is the running interpreter, so it has no probe.
 _TOOLCHAIN: Dict[str, List[str]] = {
     "python": [],
     "c++": ["g++"],
@@ -23,8 +20,8 @@ _TOOLCHAIN: Dict[str, List[str]] = {
     "c#": ["mcs", "mono"],
     "go": ["go"],
     "javascript": ["node"],
-    # TS is graded Deno-native (fixtures and prompts target Deno, which runs .ts directly).
-    # node-style TS still grades if tsc/node/npm happen to be present, but deno is what we require.
+    # TS is graded Deno-native; node-style TS still works if tsc/node/npm are present, but
+    # deno is what we require.
     "typescript": ["deno"],
     "rust": ["rustc"],
     "ruby": ["ruby"],
@@ -74,8 +71,8 @@ class LocalSubprocessExecutor:
     def __init__(self, grading: str = "lenient") -> None:
         if grading not in ("lenient", "exact"):
             raise ValueError("grading must be 'lenient' or 'exact'")
-        # "exact" = Agnostics-style whole-output rstrip equality; "lenient" = Multi-LCB's
-        # per-line + float-tolerant comparator (default, leaderboard-comparable).
+        # "exact" = Agnostics whole-output rstrip equality; "lenient" = Multi-LCB's per-line
+        # float-tolerant comparator (default).
         self.exact_match = grading == "exact"
         self._prepared: set[str] = set()
 
@@ -92,12 +89,10 @@ class LocalSubprocessExecutor:
                 f"toolchain for {language!r} not found on PATH "
                 f"(need {_TOOLCHAIN.get(language)}); install it or skip this language"
             )
-        # We deliberately do not run `go clean -cache` here: clearing it forces a cold stdlib
-        # rebuild that can exceed the 60s build timeout, while a warm cache builds fast. A very
-        # long go run that fills the cache may need a periodic manual `go clean -cache`.
+        # Do not `go clean -cache` here: a cold stdlib rebuild can exceed the 60s build timeout,
+        # while a warm cache builds fast.
         if language == "julia":
-            # Warm Julia's precompile cache once: the first cold run builds it and can exceed
-            # a per-test timeout, while warm runs start in well under a second.
+            # Warm Julia's precompile cache once; a cold first run can exceed a per-test timeout.
             try:
                 subprocess.run(
                     ["julia", "--startup-file=no", "-e", "1+1"],
@@ -131,9 +126,8 @@ class LocalSubprocessExecutor:
             max(1, int(ceil(timeout))),
             exact_match=self.exact_match,
         )
-        # Solved iff every per-test score is positive (PASSED=1). On any failure
-        # eval_plang_code returns a short list with a non-positive score, so all(>0) already
-        # short-circuits. EXECFAIL returns [TestScore.EXECFAIL].
+        # Solved iff every per-test score is positive (PASSED=1); a failure yields a short list
+        # ending in a non-positive score (FAILED or EXECFAIL).
         solved = bool(scores) and all(s.value > 0 for s in scores)
         metadata = {
             "status": str(getattr(meta, "error", "ok")),

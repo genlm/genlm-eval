@@ -102,7 +102,6 @@ include = ["genlm", "genlm/eval"]
 
 [tool.setuptools.package-data]
 "genlm.eval.domains.livecodebench.vendored" = ["few_shot_examples/generation/*.json"]
-"genlm.eval.domains.livecodebench_multilingual" = ["toolchains.environment.yml"]
 
 [tool.ruff]
 # vendored/ holds upstream LiveCodeBench / Multi-LCB code (verbatim, or vendored-plus-edits
