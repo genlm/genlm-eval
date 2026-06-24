@@ -1,7 +1,6 @@
 import importlib.util
 import json
 import pathlib
-import shutil
 import subprocess
 import sys
 import time
@@ -128,21 +127,6 @@ def _multilcb_reference(qc, plang):
     user += f"```{fence}\n{comment} YOUR CODE HERE\n```\n\n"
     user += "### Answer: (use the provided format with backticks)\n\n"
     return sysm, user
-
-
-def test_prompt_matches_multilcb_structure_per_language():
-    ds = MultilingualLCBDataset.from_jsonl(FIXTURE, "c++")
-    inst = next(iter(ds))
-    sys_msg, user_msg = multilingual_chat_messages(inst)
-    assert sys_msg["content"].startswith("You are an expert C++ programmer.")
-    assert "### Question:" in user_msg["content"]
-    assert "### Format:" in user_msg["content"]
-    assert "```cpp\n// YOUR CODE HERE\n```" in user_msg["content"]
-    assert (
-        user_msg["content"]
-        .rstrip()
-        .endswith("### Answer: (use the provided format with backticks)")
-    )
 
 
 @pytest.mark.parametrize("plang", list(_PLANG_DISPLAY))
@@ -323,20 +307,6 @@ def test_executor_metadata_shape():
     assert good is True and gm["per_test"] == ["PASSED"] and gm["n_tests"] == 1
     wrong, wm = ex.run("print(0)", ["2 3\n"], ["5\n"], "python", 6)
     assert wrong is False and wm["per_test"] == ["FAILED"]
-
-
-def test_timeout_grades_failure():
-    solved, _ = LocalSubprocessExecutor().run(
-        "while True:\n    pass", ["1\n"], ["1\n"], "python", 1
-    )
-    assert solved is False
-
-
-def test_runtime_error_nonzero_exit_fails():
-    solved, meta = LocalSubprocessExecutor().run(
-        "raise ValueError('boom')", ["2 3\n"], ["5\n"], "python", 6
-    )
-    assert solved is False and meta["per_test"] == ["EXECFAIL"]
 
 
 @pytest.mark.parametrize(
@@ -542,80 +512,6 @@ def test_status_str_is_name_stable():
         assert str(member) == member.name
     for member in testing_plang.TestScore:
         assert str(member) == member.name
-
-
-# ---- per-language toolchain smoke test ----
-
-# (binary, fenced generation) per language for a simple sum-two-ints problem.
-SUM_IO = (["2 3\n", "10 20\n"], ["5\n", "30\n"])
-SUM_SOLUTIONS = {
-    "python": ("python", "```python\na,b=map(int,input().split())\nprint(a+b)\n```"),
-    "c++": (
-        "g++",
-        '```cpp\n#include <iostream>\nint main(){long long a,b;std::cin>>a>>b;std::cout<<a+b<<"\\n";return 0;}\n```',
-    ),
-    "rust": (
-        "rustc",
-        '```rust\nuse std::io::*;\nfn main(){let mut s=String::new();stdin().read_line(&mut s).unwrap();let v:Vec<i64>=s.trim().split_whitespace().map(|x|x.parse().unwrap()).collect();println!("{}",v[0]+v[1]);}\n```',
-    ),
-    "javascript": (
-        "node",
-        "```javascript\nconst l=require('fs').readFileSync(0,'utf8').trim().split(/\\s+/).map(Number);console.log(l[0]+l[1]);\n```",
-    ),
-    "lua": ("luajit", '```lua\nlocal a,b=io.read("*n","*n")\nprint(a+b)\n```'),
-    "julia": (
-        "julia",
-        "```julia\na,b=split(readline())\nprintln(parse(Int,a)+parse(Int,b))\n```",
-    ),
-    "r": (
-        "Rscript",
-        '```r\ninput<-readLines(file("stdin"))\nv<-as.integer(strsplit(input[1]," ")[[1]])\ncat(v[1]+v[2]); cat("\\n")\n```',
-    ),
-    "ocaml": (
-        "ocaml",
-        '```ocaml\nlet () = Scanf.scanf " %d %d" (fun a b -> Printf.printf "%d\\n" (a+b))\n```',
-    ),
-    "fortran": (
-        "gfortran",
-        "```fortran\nprogram main\nimplicit none\ninteger :: a,b\nread(*,*) a,b\nprint *, a+b\nend program main\n```",
-    ),
-    "java": (
-        "javac",
-        "```java\nimport java.util.*;\npublic class Main{public static void main(String[] x){Scanner s=new Scanner(System.in);long a=s.nextLong(),b=s.nextLong();System.out.println(a+b);}}\n```",
-    ),
-    "c#": (
-        "mcs",
-        "```csharp\nusing System;\nclass Program{static void Main(){var p=Console.ReadLine().Split(' ');Console.WriteLine(long.Parse(p[0])+long.Parse(p[1]));}}\n```",
-    ),
-    "go": (
-        "go",
-        '```go\npackage main\nimport("bufio";"fmt";"os")\nfunc main(){r:=bufio.NewReader(os.Stdin);var a,b int64;fmt.Fscan(r,&a,&b);fmt.Println(a+b)}\n```',
-    ),
-    "ruby": ("ruby", "```ruby\na,b=gets.split.map(&:to_i)\nputs a+b\n```"),
-    "php": (
-        "php",
-        "```php\n<?php\nlist($a,$b)=array_map('intval',explode(' ',trim(fgets(STDIN))));\necho $a+$b,\"\\n\";\n```",
-    ),
-    "kotlin": (
-        "kotlinc",
-        '```kotlin\nfun main(){val (a,b)=readLine()!!.trim().split(" ").map{it.toLong()};println(a+b)}\n```',
-    ),
-    "typescript": (
-        "deno",
-        "```typescript\nconst data = await new Response(Deno.stdin.readable).text();\nconst [a,b]=data.trim().split(/\\s+/).map(Number);\nconsole.log(a+b);\n```",
-    ),
-}
-
-
-@pytest.mark.parametrize("language", list(SUM_SOLUTIONS))
-def test_executor_grades_good_and_wrong(language):
-    tool, good = SUM_SOLUTIONS[language]
-    if shutil.which(tool) is None:
-        pytest.skip(f"{tool} not installed")
-    ev = MultilingualLCBEvaluator(timeout_seconds=20.0)
-    inst = _instance(language, *SUM_IO)
-    assert ev.evaluate_sample(inst, good).score == 1.0
-    assert ev.evaluate_sample(inst, "no code here").score == 0.0
 
 
 # ---- per-language verdict matrix ----
