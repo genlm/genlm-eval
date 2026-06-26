@@ -24,7 +24,6 @@ from genlm.eval.domains.livecodebench import (
 )
 from genlm.eval.domains.livecodebench.fetch import _release_num
 from genlm.eval.domains.livecodebench.prompts import SYSTEM_MESSAGE_DEEPSEEK
-from genlm.eval.domains.livecodebench.vendored import testing_util
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 SAMPLE = FIXTURE_DIR / "lcb_sample.jsonl"
@@ -135,7 +134,6 @@ def test_check_correctness_returns_per_test_list():
     (FUNC_SAMPLE, FUNC_BAD, FUNC_GOOD),       # call-based path -> grade_call_based_cap
 ])
 def test_capture_runs_all_tests_and_records(sample, bad, good):
-    orig = (testing_util.grade_call_based, testing_util.grade_stdio)  # enable_capture swaps globals; restore after
     capture.enable_capture()
     try:
         assert capture.is_enabled()
@@ -148,7 +146,7 @@ def test_capture_runs_all_tests_and_records(sample, bad, good):
         _, meta_ok = check_correctness(sample, good, timeout=6.0)
         assert all(e["passed"] for e in meta_ok["executions"])
     finally:
-        testing_util.grade_call_based, testing_util.grade_stdio = orig
+        capture.disable_capture()
 
 
 SLEEPY_SAMPLE = {"input_output": json.dumps(
