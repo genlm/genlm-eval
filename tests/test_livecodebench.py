@@ -247,12 +247,17 @@ def test_build_row_functional_plain_json():
     io = json.loads(row["eval_sample"]["input_output"])
     assert io["fn_name"] == "double" and io["inputs"] == ["3", "10"] and io["outputs"] == ["6", "20"]
     assert row["testtype"] == "functional" and row["difficulty"] == "easy" and row["release"] == "release_v1"
+    # public_eval_sample carries only the public test (private "10"/"20" excluded)
+    pio = json.loads(row["public_eval_sample"]["input_output"])
+    assert pio["inputs"] == ["3"] and pio["outputs"] == ["6"] and pio["fn_name"] == "double"
 
 
 def test_build_row_stdin_compressed():
     row = build_row(_stdin_raw_compressed(), release="release_v6")
     io = json.loads(row["eval_sample"]["input_output"])
     assert io["fn_name"] is None and io["inputs"] == ["3\n", "10\n"] and row["testtype"] == "stdin"
+    pio = json.loads(row["public_eval_sample"]["input_output"])
+    assert pio["inputs"] == ["3\n"] and pio["outputs"] == ["6\n"]  # private "10\n" excluded
 
 
 def test_max_tests_truncates():
@@ -423,6 +428,22 @@ def test_to_jsonl_roundtrip(tmp_path):
     ds.to_jsonl(out)
     again = LiveCodeBenchDataset.from_jsonl(out)
     assert _ids(again) == _ids(ds)  # snapshot inherits the window; reload is identity
+
+
+def test_dataset_passes_public_eval_sample_through(tmp_path):
+    pub = {"input_output": json.dumps({"inputs": ["1\n"], "outputs": ["1\n"], "fn_name": None})}
+    row = {"question_id": "p", "question_content": "x", "starter_code": "",
+           "difficulty": "easy", "platform": "p", "contest_date": "2024-01-01",
+           "testtype": "stdin", "eval_sample": {"input_output": "{}"},
+           "public_eval_sample": pub}
+    p = tmp_path / "s.jsonl"
+    p.write_text(json.dumps(row) + "\n")
+    inst = next(iter(LiveCodeBenchDataset.from_jsonl(p)))
+    assert inst.public_eval_sample == pub
+    # Older snapshots without the field default to empty (no crash).
+    row.pop("public_eval_sample")
+    p.write_text(json.dumps(row) + "\n")
+    assert next(iter(LiveCodeBenchDataset.from_jsonl(p))).public_eval_sample == {}
 
 
 # ------------------------------ committed fixture ------------------------------ #
