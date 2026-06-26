@@ -13,9 +13,9 @@ import uuid
 
 from genlm.control import Potential
 from genlm.eval.domains.ds1000.forkserver import ForkserverUnavailable, shared_executor
-from genlm.eval.domains.ds1000.utils import _postprocess_code, _sandbox_env
+from genlm.eval.domains.ds1000.utils import _postprocess_official, _sandbox_env
 
-# Once one of these appears in the raw generation, _postprocess_code truncates
+# Once one of these appears in the raw generation, _postprocess_official truncates
 # there and no continuation can change the solution anymore.
 _TERMINAL_MARKERS = ("</code>", "\nEND SOLUTION")
 
@@ -236,7 +236,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
         # Newline guardrail when using the default sampler.
         if not raw.endswith("\n"):
             return 0.0
-        code = _postprocess_code(raw)
+        code = _postprocess_official(raw)
         if self.strict_prefix:
             out = await self._score_no_error(code, mode="complete")
             return out
@@ -272,8 +272,7 @@ class DS1000RuntimeNoErrorPotential(Potential):
         # Apply transformation before processing
         if self.f is not None:
             context = self.f(context)
-        code = self._bytes_to_str(context)
-        code = _postprocess_code(code)
+        code = _postprocess_official(self._bytes_to_str(context))
         # Empty completions never define `result`; skip the subprocess.
         if not code:
             return float("-inf")

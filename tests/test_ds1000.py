@@ -1,3 +1,5 @@
+import subprocess
+import sys
 import textwrap
 from types import SimpleNamespace
 import pytest
@@ -7,6 +9,8 @@ from genlm.eval.domains.ds1000 import (
     DS1000Dataset,
     DS1000Instance,
     DS1000RuntimeNoErrorPotential,
+    OFFICIAL,
+    CHAT,
     _postprocess_code,
 )
 
@@ -137,6 +141,71 @@ def test_postprocess_code_takes_last_fenced_block(evaluator):
     out = _postprocess_code(src)
     assert "result = right" in out
     assert "wrong" not in out
+
+
+# ------------------------------ #
+# Evaluator postprocess strategies #
+# ------------------------------ #
+
+REASONING_GEN = "Here's the solution:\n```python\nanswer_list = sorted(data)\n```\n"
+
+
+def test_official_and_chat_agree_on_raw_completions():
+    # Non-fenced (official DS-1000 format) output is byte-identical under both strategies.
+    for raw in ("result = 5\n", "tmp = list(data)\nanswer_list = sorted(tmp)\n", "def (:\n"):
+        assert OFFICIAL(raw) == CHAT(raw) == raw
+
+
+def test_chat_extracts_fenced_block_while_official_leaks_prose():
+    assert CHAT(REASONING_GEN).strip() == "answer_list = sorted(data)"
+    assert "Here's" not in CHAT(REASONING_GEN)
+    assert "Here's" in OFFICIAL(REASONING_GEN)  # official keeps the preamble
+
+
+def test_chat_extraction_preserves_function_body_indentation():
+    # A function-body answer is indented under its def; dedenting it would break the
+    # insertion. CHAT must keep the indentation, like OFFICIAL.
+    gen = "Here's the body:\n```python\n    result = df.sum()\n    return result\n```\n"
+    assert CHAT(gen) == "    result = df.sum()\n    return result\n"
+
+
+def test_chat_extraction_takes_post_think_answer_block():
+    # A <think> block that drafts code in a fence must be ignored: CHAT extracts the
+    # post-think answer block, never the reasoning draft.
+    gen = "<think>\ndraft: ```python\nx = bad(\n```\n</think>\n```python\nanswer_list = sorted(data)\n```\n"
+    assert CHAT(gen).strip() == "answer_list = sorted(data)"
+
+
+def test_solution_end_marker_truncates_both_strategies():
+    # `# SOLUTION END` is this project's generation marker (ds1000_common); both extractors
+    # cut at it so genlm-eval is the single source for the genlm-rollouts analysis.
+    assert OFFICIAL("answer_list = sorted(data)\n# SOLUTION END\nprint(x)\n").strip() == "answer_list = sorted(data)"
+    assert CHAT("```python\nanswer_list = sorted(data)\n# SOLUTION END\nx = 1\n```\n").strip() == "answer_list = sorted(data)"
+
+
+def test_postprocess_importable_without_heavy_potential():
+    # OFFICIAL/CHAT are pure string ops; importing them must not pull in the potential
+    # (genlm.control -> torch/vLLM, a ~270s import) so other tools can reuse the postprocess
+    # cheaply. Run a fresh interpreter and assert the heavy module stayed unimported.
+    code = "\n".join([
+        "import sys",
+        "from genlm.eval.domains.ds1000 import OFFICIAL, CHAT, _postprocess_code",
+        "heavy = 'genlm.eval.domains.ds1000.runtime_no_error_potential'",
+        "assert heavy not in sys.modules, 'importing OFFICIAL loaded the potential'",
+        "assert OFFICIAL('ans = 1') == 'ans = 1'",
+        "print('OK')",
+    ])
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert r.returncode == 0 and "OK" in r.stdout, r.stderr[-2000:]
+
+
+def test_evaluator_chat_recovers_fenced_solution_official_fails():
+    # A reasoning generation (prose + fenced answer) scores correctly under CHAT but fails
+    # under OFFICIAL, where the leaked preamble raises a SyntaxError.
+    instance = make_instance(harness_expect_foo_eq_42())
+    gen = "Here's the answer:\n```python\ndef foo():\n    return 42\n```\n"
+    assert DS1000Evaluator(timeout_seconds=15.0, postprocess=CHAT).evaluate_sample(instance, gen).score == 1.0
+    assert DS1000Evaluator(timeout_seconds=15.0, postprocess=OFFICIAL).evaluate_sample(instance, gen).score == 0.0
 
 
 @pytest.mark.parametrize(
@@ -390,6 +459,18 @@ def ds1000_like_potential():
     return DS1000RuntimeNoErrorPotential(
         code_context=DS1000_LIKE_CONTEXT, timeout_seconds=10.0
     )
+
+
+@pytest.mark.asyncio
+async def test_potential_uses_official_extraction_ignoring_fences():
+    # The potential always extracts with OFFICIAL: a fenced reasoning generation leaks its
+    # prose preamble, so complete() rejects it (sound: no completion survives). CHAT is an
+    # evaluator-only concern; the potential needs a monotonically growing prefix, which
+    # last-block extraction cannot give.
+    pot = DS1000RuntimeNoErrorPotential(
+        code_context=DS1000_LIKE_CONTEXT, timeout_seconds=10.0
+    )
+    assert await pot.complete([REASONING_GEN.encode()]) == float("-inf")
 
 
 @pytest.mark.asyncio

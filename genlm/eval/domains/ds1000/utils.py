@@ -1,6 +1,5 @@
 import os
 import re
-import textwrap
 
 
 def _sandbox_env(td: str, extra_env: dict | None = None) -> dict:
@@ -26,21 +25,48 @@ def _sandbox_env(td: str, extra_env: dict | None = None) -> dict:
     return base
 
 
-def _postprocess_code(t: str) -> str:
-    # Process code as in https://github.com/xlang-ai/DS-1000/blob/main/test_ds1000.py.
-    #
-    # Guard for reasoning-model output: such models often wrap the answer in a fenced
-    # ```python ... ``` block and prepend a natural-language preamble ("Here's the
-    # solution:"). The original logic kept everything BEFORE the first ``` and executed
-    # the prose, raising a spurious SyntaxError (the apostrophe in "Here's" -> unterminated
-    # string literal). When a fenced block is present, take its contents instead (the last
-    # block = the model's committed answer); fall back to the original logic otherwise.
+def _postprocess_official(t: str) -> str:
+    # xlang-ai/DS-1000 postprocess: keep everything before the first fence. `# SOLUTION END`
+    # is this project's generation marker (ds1000_common); base-model output never emits it,
+    # so the cut is a no-op for leaderboard scoring.
+    t = t.split("# SOLUTION END")[0]
     t = t.split("</code>")[0]
+    t = t.replace("```python", "")
+    t = t.split("```")[0]
+    t = t.split("\nEND SOLUTION")[0]
+    return t.replace("<code>", "")
+
+
+def _strip_reasoning(t: str) -> str:
+    # Reasoning models emit <think>...</think> before the answer; keep only the answer so
+    # code fenced inside the reasoning is never mistaken for the solution.
+    return t.rsplit("</think>", 1)[1] if "</think>" in t else t
+
+
+def _postprocess_chat(t: str) -> str:
+    # Chat/reasoning output puts the answer in a fenced ```python block after a prose (or
+    # <think>) preamble. Take the last block of the answer; with no fence, fall back to
+    # official (raw unchanged).
+    # Do not dedent: a function-body answer is indented under its `def`, and stripping
+    # that indent breaks the insertion.
+    t = _strip_reasoning(t.split("</code>")[0])
     blocks = re.findall(r"```(?:python)?[ \t]*\n(.*?)```", t, re.S)
     if blocks:
-        t = textwrap.dedent(blocks[-1])
+        t = blocks[-1]
     else:
         t = t.replace("```python", "")
         t = t.split("```")[0]
+    t = t.split("# SOLUTION END")[0]
     t = t.split("\nEND SOLUTION")[0]
     return t.replace("<code>", "")
+
+
+# Postprocess strategies (final-answer extraction): OFFICIAL keeps everything before the
+# first fence (xlang-ai/DS-1000 harness); CHAT also recovers the fenced answer block from
+# chat/reasoning output, falling back to OFFICIAL on raw output. The potential always uses
+# OFFICIAL; only the evaluator opts into CHAT.
+OFFICIAL = _postprocess_official
+CHAT = _postprocess_chat
+
+# Backward-compatible alias; the default postprocess is the chat extractor.
+_postprocess_code = _postprocess_chat
