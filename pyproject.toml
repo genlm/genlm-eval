@@ -47,6 +47,12 @@ livecodebench = [
     "huggingface_hub>=0.20",
 ]
 
+# Multilingual LiveCodeBench: Python deps only. The per-language compilers/interpreters
+# (g++, rustc, node, ...) are system toolchains provisioned separately, not pip-installable.
+livecodebench_multilingual = [
+    "huggingface_hub>=0.20",
+]
+
 ds1000_code_env = [
   "gensim==4.3.2",
   "matplotlib==3.8.4",
@@ -99,5 +105,16 @@ include = ["genlm", "genlm/eval"]
 "genlm.eval.domains.livecodebench.vendored" = ["few_shot_examples/generation/*.json"]
 
 [tool.ruff]
-# vendored/ holds verbatim upstream LiveCodeBench code; don't lint it.
-extend-exclude = ["genlm/eval/domains/livecodebench/vendored/"]
+# vendored/ holds upstream LiveCodeBench / Multi-LCB code (verbatim, or vendored-plus-edits
+# marked with "genlm-eval edit:" comments); don't lint it.
+extend-exclude = [
+    "genlm/eval/domains/livecodebench/vendored/",
+    "genlm/eval/domains/livecodebench_multilingual/vendored/",
+]
+
+[tool.pytest.ini_options]
+# tests/ on the path so `from fixtures.* import ...` resolves regardless of invocation cwd.
+pythonpath = ["tests"]
+markers = [
+    "differential: needs the ../Multi-LCB repo for differential grading",
+]
