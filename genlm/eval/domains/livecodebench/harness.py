@@ -7,11 +7,16 @@ import json
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
+from genlm.eval.domains.livecodebench import capture
 from genlm.eval.domains.livecodebench.runtime_execution import mp_context
 from genlm.eval.domains.livecodebench.vendored.testing_util import run_test
 
 
-def _child_run(sample, generation, debug, conn, timeout):
+def _child_run(sample, generation, debug, conn, timeout, capture_enabled):
+    # A forkserver child forks from the clean server, not the parent, so it does
+    # not inherit capture's grade-function patch; enable it here when the parent did.
+    if capture_enabled:
+        capture.enable_capture()
     res, metadata = run_test(sample, test=generation, debug=debug, timeout=timeout)
     conn.send((res, metadata))
     conn.close()
@@ -43,7 +48,7 @@ def check_correctness(sample: Dict[str, str], generation: str,
     parent_conn, child_conn = ctx.Pipe(duplex=False)
     p = ctx.Process(
         target=_child_run,
-        args=(sample, generation, debug, child_conn, run_timeout),
+        args=(sample, generation, debug, child_conn, run_timeout, capture.is_enabled()),
     )
     p.start()
     child_conn.close()  # keep only the child's handle open on the write end

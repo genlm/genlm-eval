@@ -184,12 +184,15 @@ def _stdio_match(prediction, gt_out):
 
 
 _ENABLED = False
+# Snapshot the originals at import, before enable_capture can swap them.
+_ORIGINALS = (_tu.grade_call_based, _tu.grade_stdio)
 
 
 def enable_capture():
     """Swap the vendored grade functions for the capturing copies (idempotent).
 
-    Apply before forking the harness child so the patch is inherited by the child.
+    The harness child re-enables capture itself, so this need only be set in the
+    parent before grading.
     """
     global _ENABLED
     # drift guard: the vendored originals must still be the functions we mirrored
@@ -198,6 +201,13 @@ def enable_capture():
     _tu.grade_call_based = grade_call_based_cap
     _tu.grade_stdio = grade_stdio_cap
     _ENABLED = True
+
+
+def disable_capture():
+    """Restore the vendored grade functions and clear the flag (inverse of enable_capture)."""
+    global _ENABLED
+    _tu.grade_call_based, _tu.grade_stdio = _ORIGINALS
+    _ENABLED = False
 
 
 def is_enabled():
