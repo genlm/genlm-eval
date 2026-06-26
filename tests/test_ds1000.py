@@ -111,6 +111,34 @@ def test_postprocess_code_strips_fences_end_solution_and_html(evaluator):
     assert "<code>" not in out
 
 
+def test_postprocess_code_drops_natural_language_preamble(evaluator):
+    # Reasoning models prepend prose before a fenced block. The old logic kept everything
+    # before the first ``` and executed the prose ("Here's the solution:"), whose apostrophe
+    # raised a spurious SyntaxError. The fenced contents must be taken instead.
+    src = (
+        "Here's the solution:\n"
+        "```python\n"
+        "result = df.iloc[1:]\n"
+        "```\n"
+    )
+    out = _postprocess_code(src)
+    assert "result = df.iloc[1:]" in out
+    assert "Here's the solution" not in out
+    import ast
+    ast.parse(out)  # no SyntaxError from leaked prose
+
+
+def test_postprocess_code_takes_last_fenced_block(evaluator):
+    # When the model floats multiple candidates, the committed answer is the last block.
+    src = (
+        "First attempt:\n```python\nresult = wrong\n```\n"
+        "Actually:\n```python\nresult = right\n```\n"
+    )
+    out = _postprocess_code(src)
+    assert "result = right" in out
+    assert "wrong" not in out
+
+
 @pytest.mark.parametrize(
     "code,expected",
     [
