@@ -6,11 +6,11 @@ import sys
 import ast
 import textwrap
 import tempfile
-from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple, Type
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple, Type
 
 from datasets import load_dataset
 
-from genlm.eval.domains.ds1000.utils import _sandbox_env, _postprocess_code
+from genlm.eval.domains.ds1000.utils import _sandbox_env, CHAT
 from genlm.eval.core import EvaluationResult, Instance, Dataset, Evaluator
 
 log = logging.getLogger(__name__)
@@ -97,12 +97,16 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
             python_executable: Optional[str] = None,
             timeout_seconds: float = 15.0,
             extra_env: Optional[Dict[str, str]] = None,
-            max_log_chars: int = 4000
+            max_log_chars: int = 4000,
+            postprocess: Callable[[str], str] = CHAT,
         ) -> None:
         self.python_executable = python_executable or sys.executable
         self.timeout_seconds = float(timeout_seconds)
         self.extra_env = dict(extra_env or {})
         self.max_log_chars = int(max_log_chars)
+        # Final-answer extraction: CHAT (default) handles fenced/reasoning output; OFFICIAL
+        # mirrors the xlang-ai/DS-1000 harness for leaderboard-comparable scoring.
+        self.postprocess = postprocess
         # Markers for detecting PASS/FAIL in output
         self.marker_pass = "<<<DS1000_PASS>>>"
         self.marker_fail = "<<<DS1000_FAIL>>>"
@@ -120,7 +124,7 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
         return False
     
     def evaluate_sample(self, instance: DS1000Instance, response: str) -> EvaluationResult:
-        solution = _postprocess_code(response)
+        solution = self.postprocess(response)
         if not solution.strip():
             return EvaluationResult(score=0.0, desc="empty solution", metadata=instance.metadata)
 
