@@ -53,6 +53,7 @@ THINK_MAX_TOKENS=8192                       # think generation budget
 FEW_SHOT_K=3                                # adaptively reduced to fit context
 MAX_MODEL_LEN=131072
 YARN_FACTOR=4.0                             # extend Qwen3 40960 -> ~131k
+TEMPERATURES="0.6"                          # single operating point for now (space-separated to sweep)
 
 # Keep big model/dataset caches off your home quota.
 export HF_HOME="$SCRATCH/hf_cache"
@@ -93,6 +94,7 @@ srun python scripts/generate_spider2_rollouts.py \
   --max-tokens "$MAX_TOKENS" \
   --think-max-tokens "$THINK_MAX_TOKENS" \
   --few-shot-k "$FEW_SHOT_K" \
+  --temperatures $TEMPERATURES \
   --max-model-len "$MAX_MODEL_LEN" \
   --yarn-factor "$YARN_FACTOR" \
   --num-shards "$NUM_SHARDS" \
