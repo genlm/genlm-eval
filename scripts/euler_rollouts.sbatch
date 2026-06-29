@@ -65,6 +65,16 @@ source "$SCRATCH/venvs/spider/bin/activate"
 
 # vLLM's FlashInfer sampler JIT-needs nvcc (absent on GPU nodes); use native sampler.
 export VLLM_USE_FLASHINFER_SAMPLER=0
+
+# Per-task, node-local JIT caches. Many array tasks compiling the same Triton /
+# torch.compile kernels into a SHARED cache on Lustre race and throw
+# "[Errno 116] Stale file handle" at kernel build time. $TMPDIR is node-local and
+# per-job, so each task gets its own cache dir (also faster than Lustre).
+TASK_CACHE="${TMPDIR:-/tmp/$USER}/jitcache_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
+export TRITON_CACHE_DIR="$TASK_CACHE/triton"
+export VLLM_CACHE_ROOT="$TASK_CACHE/vllm"
+export TORCHINDUCTOR_CACHE_DIR="$TASK_CACHE/inductor"
+mkdir -p "$TRITON_CACHE_DIR" "$VLLM_CACHE_ROOT" "$TORCHINDUCTOR_CACHE_DIR"
 # --------------------------------------------------------------------------- #
 
 MODEL_SLUGS=(
