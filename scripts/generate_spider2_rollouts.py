@@ -191,15 +191,20 @@ def run_model(args, hf_id: str, slug: str, thinking: bool, instances):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # YaRN context extension so the ~80k-token Snow schemas fit (Qwen3 is 40960
-    # native). Applied as a static rope-scaling override at load time.
+    # native). Override BOTH rope_scaling (so the kernel applies YaRN) and
+    # max_position_embeddings (so vLLM derives the extended max and accepts a
+    # larger max_model_len) -- setting only rope_scaling leaves the derived max
+    # at 40960, and positions past it trigger a CUDA out-of-bounds assert.
     hf_overrides = None
     if args.yarn_factor and args.yarn_factor > 1.0:
+        scaled_ctx = int(args.yarn_orig * args.yarn_factor)
         hf_overrides = {
             "rope_scaling": {
                 "rope_type": "yarn",
                 "factor": args.yarn_factor,
                 "original_max_position_embeddings": args.yarn_orig,
-            }
+            },
+            "max_position_embeddings": scaled_ctx,
         }
 
     print(
