@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Seque
 
 from datasets import load_dataset
 
-from genlm.eval.domains.ds1000.utils import _sandbox_env, CHAT
+from genlm.eval.domains.ds1000.utils import _sandbox_env, CHAT, unwrap_redeclared_function
 from genlm.eval.core import EvaluationResult, Instance, Dataset, Evaluator
 
 log = logging.getLogger(__name__)
@@ -125,6 +125,9 @@ class DS1000Evaluator(Evaluator[DS1000Instance]):
     
     def evaluate_sample(self, instance: DS1000Instance, response: str) -> EvaluationResult:
         solution = self.postprocess(response)
+        # A standalone `def f(df): ...` that re-declares the slot's function: unwrap to its body
+        # so DS-1000 body insertion doesn't IndentationError (genlm/rollouts issue #18).
+        solution = unwrap_redeclared_function(solution, instance.code_context)
         if not solution.strip():
             return EvaluationResult(score=0.0, desc="empty solution", metadata=instance.metadata)
 

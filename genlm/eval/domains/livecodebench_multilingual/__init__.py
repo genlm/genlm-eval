@@ -5,6 +5,7 @@ from .dataset import (
     MultilingualLCBInstance,
     resolve_language,
 )
+from .capture import capture_run
 from .evaluator import MultilingualLCBEvaluator
 from .executor import (
     LocalSubprocessExecutor,
@@ -13,8 +14,11 @@ from .executor import (
 )
 from .prompts import (
     agnostics_chat_messages,
+    chat_messages,
+    default_grading,
     extract_code,
     format_multilingual_prompt,
+    format_prompt,
     multilingual_chat_messages,
 )
 
@@ -29,7 +33,11 @@ __all__ = [
     "Language",
     "resolve_language",
     "format_multilingual_prompt",
+    "format_prompt",
+    "chat_messages",
+    "default_grading",
     "multilingual_chat_messages",
     "agnostics_chat_messages",
     "extract_code",
+    "capture_run",
 ]
