@@ -19,10 +19,13 @@ class Spider2Datum:
         datum_json: Dict[str, Any],
         gold_sql: str,
     ) -> "Spider2Datum":
+        # Spider 2.0-Lite names these fields ``db``/``question`` while
+        # Spider 2.0-Snow uses ``db_id``/``instruction``.  Accept either so the
+        # same datum loader serves both variants.
         return Spider2Datum(
             instance_id=datum_json["instance_id"],
-            schema_name=datum_json["db"],
-            utterance=datum_json["question"],
+            schema_name=datum_json.get("db", datum_json.get("db_id")),
+            utterance=datum_json.get("question", datum_json.get("instruction")),
             query=gold_sql,
             external_knowledge=datum_json.get("external_knowledge"),
         )
@@ -38,11 +41,13 @@ def load_spider2_data(
     gold_sql_dir: Optional[StrPath] = None,
     instance_filter=None,
 ) -> List[Spider2Datum]:
-    """Load Spider 2.0-Lite instances from a JSONL file.
+    """Load Spider 2.0-Lite / Spider 2.0-Snow instances from a JSONL file.
 
     Args:
-        data_filepath: Path to ``spider2-lite.jsonl`` (one JSON object per line
-            with keys ``instance_id``, ``db``, ``question``, ``external_knowledge``).
+        data_filepath: Path to ``spider2-lite.jsonl`` (keys ``instance_id``,
+            ``db``, ``question``, ``external_knowledge``) or ``spider2-snow.jsonl``
+            (keys ``instance_id``, ``db_id``, ``instruction``,
+            ``external_knowledge``); :meth:`Spider2Datum.from_json` accepts both.
         gold_sql_dir: Optional directory containing ``{instance_id}.sql`` files.
             When provided, the gold SQL is attached to each datum; otherwise the
             ``query`` field is an empty string.

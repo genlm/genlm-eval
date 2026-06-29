@@ -9,7 +9,7 @@ from .spider2_eval.dialogue import (
     load_spider2_data,
 )
 from .spider2_eval.evaluator import Evaluator as BaseSpider2Evaluator
-from .spider2_eval.schema import load_schemas
+from .spider2_eval.schema import load_nested_schemas, load_schemas
 from .spider2_eval.utils import backend_for_instance, serialize_schema
 
 from genlm.eval.core import Dataset, EvaluationResult, Evaluator, Instance
@@ -173,6 +173,77 @@ class Spider2Dataset(Dataset[Spider2Instance]):
                 spider2_schemas.update(
                     load_schemas(schemas_dir=sub, sqlite_db_dir=localdb_dir)
                 )
+
+        if grammar_json_path is None:
+            grammars = None
+        else:
+            with open(grammar_json_path, "r") as f:
+                grammars = json.load(f)
+
+        return cls(
+            dev_data,
+            spider2_schemas,
+            train_data,
+            documents_dir=documents_dir if documents_dir.exists() else None,
+            grammars=grammars,
+            **kwargs,
+        )
+
+    @classmethod
+    def from_spider2_snow_dir(
+        cls,
+        raw_spider2_snow_dir,
+        grammar_json_path=None,
+        train_jsonl_path=None,
+        instance_filter=None,
+        **kwargs,
+    ):
+        """Build a dataset from a Spider 2.0-Snow checkout.
+
+        Spider 2.0-Snow is the Snowflake-only sibling of Spider 2.0-Lite: the
+        same single-SQL-generation task, but every instance executes on the
+        Spider 2-hosted Snowflake warehouse (so no GCP billing and no local
+        SQLite slice).  Its on-disk layout matches Lite except that
+
+        * instances live in ``spider2-snow.jsonl`` with the keys
+          ``db_id``/``instruction`` (Lite uses ``db``/``question``); both
+          spellings are handled by :meth:`Spider2Datum.from_json`, and
+        * schemas are stored as ``resource/databases/{db}/{schema}/DDL.csv``
+          -- a Snowflake database has one or more schemas (e.g. ``AUSTIN`` has
+          ``AUSTIN_311``, ``AUSTIN_BIKESHARE``, ...), and all of a database's
+          tables are aggregated into one schema keyed by the database name.
+
+        Args:
+            raw_spider2_snow_dir: Path to the ``spider2-snow`` directory.
+            grammar_json_path: Optional path to a JSON mapping ``db -> lark
+                grammar`` (mirrors Spider 1's ``grammars.json``).
+            train_jsonl_path: Optional path to a separate JSONL with training /
+                few-shot instances.  Defaults to the dev JSONL when omitted.
+            instance_filter: Optional callable ``instance_id -> bool``.  When
+                omitted, every instance is kept (all are Snowflake-backed).
+        """
+        raw_spider2_snow_dir = Path(raw_spider2_snow_dir)
+        dev_jsonl = raw_spider2_snow_dir / "spider2-snow.jsonl"
+        gold_sql_dir = raw_spider2_snow_dir / "evaluation_suite" / "gold" / "sql"
+        documents_dir = raw_spider2_snow_dir / "resource" / "documents"
+
+        dev_data = load_spider2_data(
+            dev_jsonl, gold_sql_dir=gold_sql_dir, instance_filter=instance_filter
+        )
+
+        if train_jsonl_path is not None:
+            train_data = load_spider2_data(
+                train_jsonl_path,
+                gold_sql_dir=gold_sql_dir,
+                instance_filter=instance_filter,
+            )
+        else:
+            train_data = list(dev_data)
+
+        # Schemas are nested ``databases/{db}/{schema}/DDL.csv`` (a Snowflake db
+        # has one or more schemas); aggregate them per database.
+        db_root = raw_spider2_snow_dir / "resource" / "databases"
+        spider2_schemas = load_nested_schemas(db_root) if db_root.exists() else {}
 
         if grammar_json_path is None:
             grammars = None

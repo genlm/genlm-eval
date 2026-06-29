@@ -380,6 +380,88 @@ def test_load_eval_configs(tmp_path):
     assert cfgs["sf_bq001"].ignore_order is False
 
 
+########################
+# Spider 2.0-Snow      #
+########################
+
+
+def _make_snow_dir(tmp_path):
+    """Build a minimal Spider 2.0-Snow checkout under ``tmp_path``.
+
+    Mirrors the official layout: ``spider2-snow.jsonl`` (with ``db_id`` /
+    ``instruction`` keys), nested ``resource/databases/{db}/{schema}/DDL.csv``
+    schemas (the ``GA4`` db here has two schemas, to exercise aggregation), a
+    gold SQL file, and a ``spider2snow_eval.jsonl`` config.
+    """
+    import csv
+
+    snow = tmp_path / "spider2-snow"
+    gold = snow / "evaluation_suite" / "gold"
+    (gold / "sql").mkdir(parents=True)
+    (gold / "exec_result").mkdir(parents=True)
+
+    _write_jsonl(
+        snow / "spider2-snow.jsonl",
+        [
+            {
+                "instance_id": "sf_bq001",
+                "db_id": "GA4",
+                "instruction": "How many singers are there?",
+                "external_knowledge": None,
+            }
+        ],
+    )
+
+    # Two schema subdirectories under the GA4 database; tables from both are
+    # aggregated into the GA4 schema. DDL.csv is a (table_name, DDL) file,
+    # written via csv so the multi-line CREATE TABLE statements are quoted.
+    schemas = {
+        "GA4_EVENTS": ("singer", "CREATE TABLE singer (\n  Name TEXT,\n  Age INT\n)"),
+        "GA4_USERS": ("listener", "CREATE TABLE listener (\n  Id INT\n)"),
+    }
+    for schema_name, (table, ddl) in schemas.items():
+        sdir = snow / "resource" / "databases" / "GA4" / schema_name
+        sdir.mkdir(parents=True)
+        with open(sdir / "DDL.csv", "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["table_name", "DDL"])
+            writer.writerow([table, ddl])
+
+    (gold / "sql" / "sf_bq001.sql").write_text(
+        "SELECT count(*) FROM singer;", encoding="utf-8"
+    )
+    _write_jsonl(
+        gold / "spider2snow_eval.jsonl",
+        [{"instance_id": "sf_bq001", "condition_cols": [], "ignore_order": True}],
+    )
+    return snow
+
+
+def test_snow_dataset_loads_instruction_and_flat_schema(tmp_path):
+    snow = _make_snow_dir(tmp_path)
+    ds = Spider2Dataset.from_spider2_snow_dir(snow)
+
+    instances = list(ds)
+    assert len(instances) == 1
+    inst = instances[0]
+    # db_id -> schema_name, instruction -> utterance.
+    assert inst.schema_name == "GA4"
+    assert inst.utterance == "How many singers are there?"
+    assert inst.spider2_instance_id == "sf_bq001"
+    assert backend_for_instance(inst.spider2_instance_id) == "snowflake"
+    # Tables from both schema subdirectories of GA4 are aggregated.
+    assert {t.name for t in inst.tables} == {"singer", "listener"}
+    assert "singer" in inst.schema_str and "listener" in inst.schema_str
+    assert inst.gold == "SELECT count(*) FROM singer;"
+
+
+def test_snow_evaluator_autodetects_eval_config(tmp_path):
+    snow = _make_snow_dir(tmp_path)
+    evaluator = Spider2Evaluator(snow).evaluator
+    # The snow-named config is picked up without an explicit path.
+    assert "sf_bq001" in evaluator.eval_configs
+
+
 @pytest.fixture
 def potential(spider2_dataset):
     first_instance = next(iter(spider2_dataset))

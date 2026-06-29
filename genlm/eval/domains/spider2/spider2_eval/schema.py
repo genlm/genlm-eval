@@ -187,3 +187,33 @@ def load_schemas(
                 sqlite_path = candidate
         schemas[entry.name] = load_schema(entry, sqlite_path=sqlite_path)
     return schemas
+
+
+def load_nested_schemas(databases_dir: StrPath) -> Dict[str, DbSchema]:
+    """Load schemas whose tables are split across schema subdirectories.
+
+    Spider 2.0-Snow stores DDLs as ``{db}/{schema}/DDL.csv`` -- a Snowflake
+    *database* contains one or more *schemas*, each with its own ``DDL.csv``
+    (e.g. ``AUSTIN/AUSTIN_311/DDL.csv``, ``AUSTIN/AUSTIN_BIKESHARE/DDL.csv``).
+    Since an instance only names the database (``db_id``), all tables across a
+    database's schema subdirectories are aggregated into a single
+    :class:`DbSchema` keyed by the database name.
+    """
+    databases_dir = Path(databases_dir)
+    schemas: Dict[str, DbSchema] = {}
+    if not databases_dir.exists():
+        return schemas
+
+    for db_dir in sorted(databases_dir.iterdir()):
+        if not db_dir.is_dir():
+            continue
+        tables: List[Table] = []
+        # Tables live one level down (``{db}/{schema}/DDL.csv``); also accept a
+        # ``DDL.csv`` directly under the db dir for robustness.
+        for ddl_path in sorted(db_dir.glob("*/DDL.csv")):
+            tables.extend(parse_ddl_csv(ddl_path))
+        direct = db_dir / "DDL.csv"
+        if direct.exists():
+            tables.extend(parse_ddl_csv(direct))
+        schemas[db_dir.name] = DbSchema(name=db_dir.name, tables=tables)
+    return schemas

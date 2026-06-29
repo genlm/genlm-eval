@@ -24,6 +24,13 @@ queries **frequently exceed 100 lines**.
 **547** instances, each shipping the database metadata and supporting documentation needed to write
 one SQL query. It is the practical target for constrained-generation evaluation.
 
+**Spider 2.0-Snow** is the **Snowflake-only** sibling of Lite (also **547** single-SQL instances):
+the same task, but every database is hosted on the Spider 2-provided Snowflake warehouse, so it runs
+with no GCP billing and no local-SQLite slice. This domain loads it via
+`Spider2Dataset.from_spider2_snow_dir(...)`; see [§7](#7-spider-20-snow). (The third sibling,
+**Spider 2.0-DBT** — 68 repository-level dbt/DuckDB *code-agent* tasks — is a different task
+paradigm and is **not** covered by this single-SQL domain.)
+
 **Difficulty signal.** On Spider 2.0, `o1-preview` reaches **21.3%** execution accuracy, versus
 **91.2%** on Spider 1.0 and **73.0%** on BIRD — i.e. Spider 2.0 is roughly 4× harder than the
 benchmark it succeeds.
@@ -156,11 +163,48 @@ benchmark with no GCP billing — and treats BigQuery as opt-in.
 - **BigQuery** — implemented (`execute_bigquery`); **opt-in** (executes only when a
   `bigquery_project` is set) and authenticates via Application Default Credentials. Live execution
   against `bigquery-public-data` has been verified end-to-end.
+- **Spider 2.0-Snow** — supported via `Spider2Dataset.from_spider2_snow_dir(...)`; reuses the
+  Snowflake backend above. See [§7](#7-spider-20-snow).
 - **Potential** — currently the Spider 1 SQLite lark grammar (`Spider2TableColumnVerifier`),
   adequate for the local slice only. A dialect-aware potential + schema linking for large schemas
   is future work.
 
 ---
+
+## 7. Spider 2.0-Snow
+
+Spider 2.0-Snow is loaded with `Spider2Dataset.from_spider2_snow_dir(<spider2-snow dir>)`. It reuses
+the Lite `Spider2Instance`/`Spider2Evaluator` machinery (and the existing `execute_snowflake`
+backend), so no new dependencies are required. Its on-disk layout matches Lite with two differences:
+
+```
+spider2-snow/
+  spider2-snow.jsonl                       # {instance_id, db_id, instruction, external_knowledge}
+  evaluation_suite/
+    gold/sql/{instance_id}.sql             # gold query
+    gold/exec_result/{instance_id}*.csv    # gold result table(s)
+    gold/spider2snow_eval.jsonl            # per-instance {condition_cols, ignore_order}
+    snowflake_credential.json              # (you supply)
+  resource/
+    databases/{db}/{schema}/DDL.csv        # schema DDLs, nested by db then schema
+    documents/                             # external-knowledge files
+```
+
+A Snowflake **database** (named by the instance's `db_id`) contains one or more
+**schemas**, each with its own `DDL.csv` (e.g. `AUSTIN/AUSTIN_311/DDL.csv`,
+`AUSTIN/AUSTIN_BIKESHARE/DDL.csv`). Since an instance names only the database,
+`load_nested_schemas` aggregates the tables from all of a database's schema
+subdirectories into one schema keyed by the database name.
+
+| | **Spider 2.0-Lite** | **Spider 2.0-Snow** |
+|---|---|---|
+| Instance fields | `db`, `question` | `db_id`, `instruction` |
+| Schema path | `databases/{backend}/{db}/DDL.csv` | `databases/{db}/{schema}/DDL.csv` (nested, aggregated) |
+| Eval config | `gold/spider2lite_eval.jsonl` | `gold/spider2snow_eval.jsonl` |
+| Backends | SQLite / Snowflake / BigQuery | Snowflake only |
+
+`Spider2Datum.from_json` accepts both field spellings and `Spider2Evaluator` auto-detects either
+eval-config filename, so the only Snow-specific entry point is the loader classmethod.
 
 ## Sources
 

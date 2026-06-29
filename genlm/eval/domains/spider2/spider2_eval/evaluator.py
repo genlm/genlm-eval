@@ -222,10 +222,14 @@ class Evaluator:
         self.timeout = timeout
 
         if eval_config_path is None:
-            default_cfg = (
-                spider2_dir / "evaluation_suite" / "gold" / "spider2lite_eval.jsonl"
-            )
-            eval_config_path = default_cfg if default_cfg.exists() else None
+            # Lite ships ``spider2lite_eval.jsonl``; Snow ships
+            # ``spider2snow_eval.jsonl`` in the same location. Use whichever exists.
+            gold_dir = spider2_dir / "evaluation_suite" / "gold"
+            for cfg_name in ("spider2lite_eval.jsonl", "spider2snow_eval.jsonl"):
+                candidate = gold_dir / cfg_name
+                if candidate.exists():
+                    eval_config_path = candidate
+                    break
         self.eval_configs: Dict[str, Spider2EvalConfig] = (
             load_eval_configs(eval_config_path) if eval_config_path else {}
         )
