@@ -31,7 +31,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
+import re
 import statistics
 import time
 from dataclasses import dataclass
@@ -83,34 +85,95 @@ def _read_ddl_rows(ddl_csv: Path) -> List[Tuple[str, str]]:
     return rows
 
 
-def relevant_schema_str(db_root: Path, db_id: str, gold_sql: str, scope: str) -> str:
-    """Build the schema DDL text for one instance.
-
-    Snow stores schemas as ``databases/{db}/{schema}/DDL.csv``. ``scope``:
-    ``full`` keeps every schema; ``schema`` keeps only schemas whose name appears
-    in the gold SQL; ``table`` further keeps only the gold-referenced tables.
-    Falls back to the broader set if nothing matches (so a prompt is never empty).
-    """
+def _gather_tables(db_root: Path, db_id: str) -> List[Tuple[str, str, str]]:
+    """All ``(schema_name, table_name, ddl)`` for a database, across its schemas."""
     db_dir = db_root / db_id
+    out: List[Tuple[str, str, str]] = []
     if not db_dir.is_dir():
+        return out
+    for d in sorted(db_dir.iterdir()):
+        if d.is_dir():
+            for table, ddl in _read_ddl_rows(d / "DDL.csv"):
+                out.append((d.name, table, ddl))
+    return out
+
+
+def _tokenize(text: str) -> List[str]:
+    """Lowercase word tokens, splitting camelCase and snake_case identifiers."""
+    text = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", text)
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+class BM25:
+    """Minimal Okapi BM25 over a small document set (no external dependency)."""
+
+    def __init__(self, docs: List[str], k1: float = 1.5, b: float = 0.75):
+        self.k1, self.b = k1, b
+        self.docs = [_tokenize(d) for d in docs]
+        self.n = len(self.docs)
+        self.avgdl = (sum(len(d) for d in self.docs) / self.n) if self.n else 0.0
+        df: dict = {}
+        for d in self.docs:
+            for w in set(d):
+                df[w] = df.get(w, 0) + 1
+        self.idf = {w: math.log(1 + (self.n - c + 0.5) / (c + 0.5)) for w, c in df.items()}
+
+    def scores(self, query: str) -> List[float]:
+        from collections import Counter
+
+        q = _tokenize(query)
+        out = []
+        for d in self.docs:
+            tf = Counter(d)
+            dl = len(d)
+            s = 0.0
+            for w in q:
+                f = tf.get(w, 0)
+                if f:
+                    s += self.idf.get(w, 0.0) * f * (self.k1 + 1) / (
+                        f + self.k1 * (1 - self.b + self.b * dl / (self.avgdl or 1))
+                    )
+            out.append(s)
+        return out
+
+
+def build_schema_str(
+    db_root: Path,
+    db_id: str,
+    question: str,
+    gold_sql: str,
+    scope: str,
+    top_k: int,
+) -> str:
+    """Build the schema DDL text for one instance under ``scope``.
+
+    * ``full`` -- every table in the database.
+    * ``schema`` -- tables in schemas whose name appears in the gold SQL (oracle).
+    * ``table`` -- only the gold-referenced tables (oracle).
+    * ``bm25`` -- top-``top_k`` tables retrieved from the *question* by BM25 over
+      each table's (schema, name, DDL) text. Realistic, no gold leak.
+    Falls back to the broader set if nothing matches.
+    """
+    tables = _gather_tables(db_root, db_id)
+    if not tables:
         return ""
-    schema_dirs = [d for d in sorted(db_dir.iterdir()) if d.is_dir()]
     gold_low = (gold_sql or "").lower()
 
     if scope == "full":
-        chosen = schema_dirs
+        chosen = tables
+    elif scope == "schema":
+        chosen = [r for r in tables if r[0].lower() in gold_low] or tables
+    elif scope == "table":
+        chosen = [r for r in tables if r[1].lower() in gold_low] or tables
+    elif scope == "bm25":
+        docs = [f"{s} {t} {ddl}" for (s, t, ddl) in tables]
+        scores = BM25(docs).scores(question)
+        order = sorted(range(len(tables)), key=lambda i: scores[i], reverse=True)
+        chosen = [tables[i] for i in order[:top_k]]
     else:
-        chosen = [d for d in schema_dirs if d.name.lower() in gold_low] or schema_dirs
+        raise ValueError(f"unknown schema scope: {scope}")
 
-    rows: List[Tuple[str, str]] = []
-    for d in chosen:
-        rows.extend(_read_ddl_rows(d / "DDL.csv"))
-
-    if scope == "table":
-        matched = [(t, ddl) for (t, ddl) in rows if t.lower() in gold_low]
-        rows = matched or rows
-
-    return "\n\n".join(ddl for _, ddl in rows)
+    return "\n\n".join(ddl for (_, _, ddl) in chosen)
 
 
 def user_message_template(schema_str: str, question: str, external_knowledge=None) -> str:
@@ -191,37 +254,49 @@ class RolloutInstance:
     user_message: str
 
 
-def prepare(data_dir: str, few_shot_k: int, schema_scope: str):
-    """Load Snow and build reduced-schema prompts.
+def prepare(data_dir: str, few_shot_k: int, schema_scope: str, top_k: int):
+    """Load Snow raw fields and build per-instance prompts.
 
-    Returns ``(gen_instances, few_shot, pool_ids)`` where ``few_shot`` is a list of
-    ``(user_message, gold_sql)`` built from the first ``few_shot_k`` instances
-    (excluded from generation to avoid leaking a question its own gold answer).
+    Reads ``spider2-snow.jsonl`` + gold SQL + documents directly (not via
+    ``Spider2Dataset``, whose iterator serializes the full schema per instance --
+    slow and unused here). Returns ``(gen_instances, few_shot, pool_ids)``; the
+    first ``few_shot_k`` instances form the few-shot pool and are excluded from
+    generation (so a question never sees its own gold answer).
     """
-    from genlm.eval.domains.spider2 import Spider2Dataset
-
-    db_root = Path(data_dir) / "resource" / "databases"
-    dataset = Spider2Dataset.from_spider2_snow_dir(
-        data_dir, few_shot_example_ids=list(range(few_shot_k))
+    from genlm.eval.domains.spider2.spider2_eval.dialogue import (
+        load_external_knowledge,
+        load_spider2_data,
     )
-    all_insts = list(dataset)
+
+    snow = Path(data_dir)
+    db_root = snow / "resource" / "databases"
+    docs_dir = snow / "resource" / "documents"
+    data = load_spider2_data(
+        snow / "spider2-snow.jsonl",
+        gold_sql_dir=snow / "evaluation_suite" / "gold" / "sql",
+    )
     pool_ids = set(range(few_shot_k))
 
-    def um(inst) -> str:
-        schema = relevant_schema_str(db_root, inst.schema_name, inst.gold, schema_scope)
-        return user_message_template(schema, inst.utterance, inst.external_knowledge)
+    def um(d) -> str:
+        ek = (
+            load_external_knowledge(docs_dir, d.external_knowledge)
+            if docs_dir.exists()
+            else None
+        )
+        schema = build_schema_str(db_root, d.schema_name, d.utterance, d.query, schema_scope, top_k)
+        return user_message_template(schema, d.utterance, ek)
 
-    few_shot = [(um(i), i.gold) for i in all_insts if i.instance_id in pool_ids]
+    few_shot = [(um(d), d.query) for idx, d in enumerate(data) if idx in pool_ids]
     gen = [
         RolloutInstance(
-            spider2_instance_id=i.spider2_instance_id,
-            instance_id=i.instance_id,
-            db=i.schema_name,
-            gold=i.gold,
-            user_message=um(i),
+            spider2_instance_id=d.instance_id,
+            instance_id=idx,
+            db=d.schema_name,
+            gold=d.query,
+            user_message=um(d),
         )
-        for i in all_insts
-        if i.instance_id not in pool_ids
+        for idx, d in enumerate(data)
+        if idx not in pool_ids
     ]
     return gen, few_shot, sorted(pool_ids)
 
@@ -243,7 +318,8 @@ def parse_args() -> argparse.Namespace:
         default=[s for _, s, _ in MODELS],
         choices=[s for _, s, _ in MODELS],
     )
-    p.add_argument("--schema-scope", choices=["full", "schema", "table"], default="schema")
+    p.add_argument("--schema-scope", choices=["full", "schema", "table", "bm25"], default="bm25")
+    p.add_argument("--link-top-k", type=int, default=10, help="Tables to retrieve for --schema-scope bm25.")
     p.add_argument("--samples", type=int, default=100, help="Samples/instance at t>0 (nothink).")
     p.add_argument("--think-samples", type=int, default=20, help="Samples/instance at t>0 (think).")
     p.add_argument("--temperatures", type=float, nargs="+", default=DEFAULT_TEMPERATURES)
@@ -437,7 +513,9 @@ def main() -> None:
     args = parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
 
-    gen, few_shot, pool_ids = prepare(args.data_dir, args.few_shot_k, args.schema_scope)
+    gen, few_shot, pool_ids = prepare(
+        args.data_dir, args.few_shot_k, args.schema_scope, args.link_top_k
+    )
     gen = _shard(gen, args.shard_id, args.num_shards, args.limit)
     print(
         f"shard {args.shard_id}/{args.num_shards}: {len(gen)} instances "
