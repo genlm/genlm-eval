@@ -40,6 +40,7 @@ from .capture import capture_run
 from .dataset import MultilingualLCBDataset
 from .executor import is_toolchain_available
 from .prompts import default_grading, extract_code
+from .vendored.testing_plang import Status
 
 EXEC_SCHEMA = pa.schema([
     ("model", pa.string()), ("temp", pa.string()),
@@ -107,7 +108,19 @@ def _err_code(rec) -> int:
         return 1
     if rec["status"] == "capped":
         return -1
-    return -2 if rec["status"] == "Status.Done" else -5
+    # capture._rec stores str(status), and str(Status.Done) == "Done". A cleanly-run failing test
+    # (Done, not passed) is a wrong answer (-2); any other non-passing status is an exec failure.
+    return -2 if rec["status"] == str(Status.Done) else -5
+
+
+def _no_capture_records(n_tests):
+    """Failing placeholder rows for a sample that never executed (empty or unparsed code), one per
+    test so the row count matches executed samples. A zero-test instance yields a single row."""
+    if n_tests <= 0:
+        return [{"test_idx": 0, "passed": False, "output": "", "error_message": "no tests",
+                 "error_code": -5, "status": "none", "time_s": 0.0}]
+    return [{"test_idx": i, "passed": False, "output": "", "error_message": "empty or unparsed code",
+             "error_code": -5, "status": "uncaptured", "time_s": 0.0} for i in range(n_tests)]
 
 
 def _capture_one(arg):
@@ -180,8 +193,7 @@ def capture_cell(a):
         sample = int(r.get("sample", 0))
         inputs, outputs = tests.get(iid) or ([], [])
         if not per:
-            per = [{"test_idx": 0, "passed": False, "output": "", "error_message": "no tests or empty code",
-                    "error_code": -5, "status": "none", "time_s": 0.0}]
+            per = _no_capture_records(len(outputs))
         nt = len(per)
         for rec in per:
             ti = rec["test_idx"]

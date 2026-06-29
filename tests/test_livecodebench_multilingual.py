@@ -29,6 +29,7 @@ from genlm.eval.domains.livecodebench_multilingual import (
     multilingual_chat_messages,
     resolve_language,
 )
+from genlm.eval.domains.livecodebench_multilingual.capture import _rec
 from genlm.eval.domains.livecodebench_multilingual.executor import _TOOLCHAIN
 from genlm.eval.domains.livecodebench_multilingual.vendored import testing_plang
 from genlm.eval.domains.livecodebench_multilingual.vendored.testing_plang import (
@@ -817,3 +818,41 @@ def test_capture_run_empty_code_fails_all():
 def test_capture_run_rejects_unsupported_language():
     with pytest.raises(NotImplementedError, match="no recipe"):
         capture_run("x", ["1\n"], ["1\n"], "python")
+
+
+# ---- exec_capture: per-test error_code and no-capture rows ----
+
+# exec_capture is a standalone CLI module needing pyarrow, which the package does not require;
+# skip these if pyarrow is absent instead of failing the whole module at collection.
+
+
+def _exec_capture():
+    pytest.importorskip("pyarrow")
+    from genlm.eval.domains.livecodebench_multilingual import exec_capture
+
+    return exec_capture
+
+
+def test_err_code_distinguishes_wrong_answer_from_exec_failure():
+    # A cleanly-run wrong answer is Status.Done + passed False, mapping to -2 (not -5).
+    ec = _exec_capture()
+    st = testing_plang.Status
+    cases = [
+        (_rec(0, True, "6\n", "", 0, st.Done, 0.1), 1),
+        (_rec(0, False, "5\n", "", 0, st.Done, 0.1), -2),
+        (_rec(0, False, "", "boom", 1, st.Exception, 0.1), -5),
+        (_rec(0, False, "", "", -4, st.BuildFailed, 0.0), -5),
+        (_rec(0, False, "", "cap", -1, "capped", 0.0), -1),
+    ]
+    for rec, code in cases:
+        assert ec._err_code(rec) == code, rec
+
+
+def test_no_capture_records_one_row_per_test():
+    # Empty/unparsed code must emit one row per test, like the build-fail and capped paths.
+    ec = _exec_capture()
+    recs = ec._no_capture_records(3)
+    assert [r["test_idx"] for r in recs] == [0, 1, 2]
+    assert all(r["passed"] is False and r["error_code"] == -5 for r in recs)
+    # a zero-test instance still yields a single row
+    assert len(ec._no_capture_records(0)) == 1
