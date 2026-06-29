@@ -22,6 +22,7 @@ from genlm.eval.domains.livecodebench_multilingual import (
     MultilingualLCBDataset,
     MultilingualLCBEvaluator,
     MultilingualLCBInstance,
+    capture_run,
     extract_code,
     format_multilingual_prompt,
     is_toolchain_available,
@@ -762,3 +763,57 @@ def test_verdict_agrees_with_upstream(language, variant):
     )
     theirs = bool(scores) and all(s.value > 0 for s in scores)
     assert ours == theirs, f"{language}/{variant}: ours={ours} upstream={theirs}"
+
+
+# ---- capture_run: full per-test capture without short-circuit ----
+
+# capture_run only handles the Agnostics low-resource languages: lua/julia/r are interpreted,
+# ocaml/fortran are compiled once then run per test.
+_CAPTURE_LANGS = ["lua", "julia", "r", "ocaml", "fortran"]
+
+
+@pytest.mark.parametrize("language", _CAPTURE_LANGS)
+def test_capture_run_correct_solves_all(language):
+    if not is_toolchain_available(language):
+        pytest.skip(f"{language} toolchain not installed")
+    solved, recs = capture_run(
+        MLCB_SOLUTIONS[language]["correct"], SUM_N_INPUTS, SUM_N_OUTPUTS, language
+    )
+    assert solved is True
+    assert [r["passed"] for r in recs] == [True] * len(SUM_N_OUTPUTS)
+
+
+@pytest.mark.parametrize("language", _CAPTURE_LANGS)
+def test_capture_run_keeps_record_past_first_failure(language):
+    # The graded path short-circuits on the first failing test; capture_run keeps all of them.
+    # `partial` passes the first two inputs and fails the n==4 input.
+    if not is_toolchain_available(language):
+        pytest.skip(f"{language} toolchain not installed")
+    solved, recs = capture_run(
+        MLCB_SOLUTIONS[language]["partial"], SUM_N_INPUTS, SUM_N_OUTPUTS, language
+    )
+    assert solved is False
+    assert [r["passed"] for r in recs] == [True, True, False]
+
+
+@pytest.mark.parametrize("language", ["ocaml", "fortran"])
+def test_capture_run_compile_failure_fails_all(language):
+    if not is_toolchain_available(language):
+        pytest.skip(f"{language} toolchain not installed")
+    solved, recs = capture_run(
+        MLCB_SOLUTIONS[language]["compile_error"], SUM_N_INPUTS, SUM_N_OUTPUTS, language
+    )
+    assert solved is False
+    assert [r["passed"] for r in recs] == [False] * len(SUM_N_OUTPUTS)
+    assert all(r["status"] == "BuildFailed" for r in recs)
+
+
+def test_capture_run_empty_code_fails_all():
+    solved, recs = capture_run("", SUM_N_INPUTS, SUM_N_OUTPUTS, "lua")
+    assert solved is False
+    assert [r["passed"] for r in recs] == [False] * len(SUM_N_OUTPUTS)
+
+
+def test_capture_run_rejects_unsupported_language():
+    with pytest.raises(NotImplementedError, match="no recipe"):
+        capture_run("x", ["1\n"], ["1\n"], "python")
