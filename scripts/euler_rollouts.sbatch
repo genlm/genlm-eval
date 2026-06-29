@@ -1,75 +1,61 @@
 #!/bin/bash
 # Spider 2.0-Snow rollout generation as a SLURM job array on Euler (ETH).
 #
-# Each array task = one (config, instance-shard): it loads one Qwen3 config on
-# its GPU and sweeps all temperatures over its slice of the instances.
+# Each array task = one (config, instance-shard): loads one Qwen3 config and
+# samples completions for its slice of instances at the configured temperature(s).
 #
-# CONFIGS (6): {Qwen3-4B, Qwen3-8B, Qwen3-1.7B} x {think, nothink}. "think"
-# toggles Qwen3 reasoning (chat-template enable_thinking); think uses a larger
-# token budget (8192) and fewer samples (20) than nothink (1024 tokens, 100).
-# YaRN extends the 40,960 native context to ~131k so ~80k-token Snow schemas fit.
+# Schema is reduced per-instance via BM25 question->table linking (small prompts,
+# so no YaRN, fits 40,960 context). CONFIGS (6): {Qwen3-4B, Qwen3-8B, Qwen3-1.7B}
+# x {think, nothink}, NUM_SHARDS=32 -> 6*32 = 192 tasks.
 #
-#   idx 0  qwen3-4b-think      } 4B + 8B: run on RTX PRO 6000 (96GB). 80k-token
-#   idx 1  qwen3-4b-nothink    }          prompts + long thinking traces need
-#   idx 2  qwen3-8b-think      }          far more KV than a 24GB card holds.
-#   idx 3  qwen3-8b-nothink    }
-#   idx 4  qwen3-1.7b-think    } 1.7B: fits a 24GB RTX 4090.
+#   idx 0  qwen3-4b-think      } 4B + 1.7B fit a 24GB RTX 4090.
+#   idx 1  qwen3-4b-nothink    }
+#   idx 2  qwen3-8b-think      } 8B: decode KV (samples x max_tokens) needs a
+#   idx 3  qwen3-8b-nothink    }     >=80GB GPU even with small prompts.
+#   idx 4  qwen3-1.7b-think    }
 #   idx 5  qwen3-1.7b-nothink  }
 #
-# With NUM_SHARDS=32 there are 6*32 = 192 tasks. Submit in two ranges so each
-# half lands on the right GPU (CLI flags override the #SBATCH defaults):
-#
-#   # 4B + 8B (array 0-127) on RTX PRO 6000:
-#   sbatch --array=0-127   --gpus=pro_6000:1 scripts/euler_rollouts.sbatch
-#   # 1.7B (array 128-191) on RTX 4090:
-#   sbatch --array=128-191 --gpus=rtx_4090:1 scripts/euler_rollouts.sbatch
-#
-# Before submitting: edit DATA_DIR/OUT_DIR/venv path, ensure $HF_TOKEN is set,
-# and pre-download the 3 models once on a login node (compute nodes reach the
-# Hub only via eth_proxy; pre-caching avoids 192 tasks downloading at once):
-#   source $SCRATCH/venvs/spider/bin/activate; export HF_HOME=$SCRATCH/hf_cache
-#   for m in Qwen3-1.7B Qwen3-4B Qwen3-8B; do hf download Qwen/$m --quiet; done
+# Submit in three ranges (CLI flags override the #SBATCH GPU default):
+#   sbatch --array=0-63    --gpus=rtx_4090:1          scripts/euler_rollouts.sbatch   # 4B
+#   sbatch --array=64-127  --gpus=1 --gres=gpumem:80g scripts/euler_rollouts.sbatch   # 8B
+#   sbatch --array=128-191 --gpus=rtx_4090:1          scripts/euler_rollouts.sbatch   # 1.7B
 
 #SBATCH --job-name=spider2snow-rollouts
 #SBATCH --output=logs/rollout_%A_%a.out
 #SBATCH --error=logs/rollout_%A_%a.err
-#SBATCH --array=0-191                 # override per submission (see header)
-#SBATCH --gpus=pro_6000:1             # default for the 4B/8B half; override with --gpus=rtx_4090:1 for 1.7B
+#SBATCH --array=0-191                 # override per submission (see above)
+#SBATCH --gpus=rtx_4090:1             # default for 4B/1.7B; override with --gpus=1 --gres=gpumem:80g for 8B
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem-per-cpu=8G
+#SBATCH --cpus-per-task=4
+#SBATCH --mem-per-cpu=6G              # 24GB/task: lean, to fit more tasks under the per-user RAM quota
 #SBATCH --time=24:00:00
 
 set -euo pipefail
 
 # ---- user config ---------------------------------------------------------- #
 NUM_SHARDS=32
-DATA_DIR="$SCRATCH/Spider2/spider2-snow"   # <-- your downloaded spider2-snow dir
-OUT_DIR="$SCRATCH/rollouts/spider2-snow"
+DATA_DIR="$SCRATCH/Spider2/spider2-snow"
+OUT_DIR="$SCRATCH/rollouts/snow_bm25"      # reused: completed shards are skipped
+SCHEMA_SCOPE=bm25
+LINK_TOP_K=10
 SAMPLES=100                                 # nothink samples/instance at t>0
 THINK_SAMPLES=20                            # think samples/instance at t>0
 MAX_TOKENS=1024                             # nothink generation budget
 THINK_MAX_TOKENS=8192                       # think generation budget
-FEW_SHOT_K=3                                # adaptively reduced to fit context
-MAX_MODEL_LEN=131072
-YARN_FACTOR=4.0                             # extend Qwen3 40960 -> ~131k
-TEMPERATURES="0.6"                          # single operating point for now (space-separated to sweep)
+FEW_SHOT_K=3
+MAX_MODEL_LEN=40960                         # Qwen3 native; BM25 prompts fit, no YaRN
+YARN_FACTOR=1.0                             # disabled
+TEMPERATURES="0.6"                          # single operating point for now
 
-# Keep big model/dataset caches off your home quota.
 export HF_HOME="$SCRATCH/hf_cache"
-export HF_TOKEN="${HF_TOKEN:?set HF_TOKEN for gated weights}"
+export HF_TOKEN="${HF_TOKEN:?set HF_TOKEN}"
 
-module load eth_proxy                       # outbound HTTPS for the Hub on compute nodes
-# Adjust to your Euler stack if needed (e.g. `module load stack/2024-06 python/3.11.6`).
+module load eth_proxy
 source "$SCRATCH/venvs/spider/bin/activate"
+export VLLM_USE_FLASHINFER_SAMPLER=0         # native sampler (no nvcc on GPU nodes)
 
-# vLLM's FlashInfer sampler JIT-needs nvcc (absent on GPU nodes); use native sampler.
-export VLLM_USE_FLASHINFER_SAMPLER=0
-
-# Per-task, node-local JIT caches. Many array tasks compiling the same Triton /
-# torch.compile kernels into a SHARED cache on Lustre race and throw
-# "[Errno 116] Stale file handle" at kernel build time. $TMPDIR is node-local and
-# per-job, so each task gets its own cache dir (also faster than Lustre).
+# Per-task node-local JIT caches: shared Triton/torch caches on Lustre race under
+# many concurrent tasks -> "[Errno 116] Stale file handle" at kernel compile.
 TASK_CACHE="${TMPDIR:-/tmp/$USER}/jitcache_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 export TRITON_CACHE_DIR="$TASK_CACHE/triton"
 export VLLM_CACHE_ROOT="$TASK_CACHE/vllm"
@@ -78,11 +64,11 @@ mkdir -p "$TRITON_CACHE_DIR" "$VLLM_CACHE_ROOT" "$TORCHINDUCTOR_CACHE_DIR"
 # --------------------------------------------------------------------------- #
 
 MODEL_SLUGS=(
-  qwen3-4b-think         # idx 0  ] 4B+8B -> array 0-127,  RTX PRO 6000
+  qwen3-4b-think         # idx 0  ] 4B  -> array 0-63,    RTX 4090
   qwen3-4b-nothink       # idx 1  ]
-  qwen3-8b-think         # idx 2  ]
+  qwen3-8b-think         # idx 2  ] 8B  -> array 64-127,  >=80GB
   qwen3-8b-nothink       # idx 3  ]
-  qwen3-1.7b-think       # idx 4  ] 1.7B  -> array 128-191, RTX 4090
+  qwen3-1.7b-think       # idx 4  ] 1.7B-> array 128-191, RTX 4090
   qwen3-1.7b-nothink     # idx 5  ]
 )
 
@@ -99,6 +85,8 @@ srun python scripts/generate_spider2_rollouts.py \
   --data-dir "$DATA_DIR" \
   --out-dir "$OUT_DIR" \
   --models "$MODEL_SLUG" \
+  --schema-scope "$SCHEMA_SCOPE" \
+  --link-top-k "$LINK_TOP_K" \
   --samples "$SAMPLES" \
   --think-samples "$THINK_SAMPLES" \
   --max-tokens "$MAX_TOKENS" \
