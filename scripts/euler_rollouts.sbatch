@@ -40,10 +40,20 @@ MAX_TOKENS=2048
 export HF_HOME="$SCRATCH/hf_cache"
 export HF_TOKEN="${HF_TOKEN:?set HF_TOKEN for gated Llama weights}"
 
-# Environment: load the CUDA stack and activate your venv with vllm installed.
-# (Adjust to your Euler stack — e.g. `module load stack/2024-06 gcc/12.2.0 cuda/12.x`.)
-# module load eth_proxy stack/2024-06 cuda/12.4.1
+# Euler COMPUTE nodes have no direct internet; `eth_proxy` routes outbound HTTPS
+# through the cluster proxy so the job can reach the Hub. Loading it is required.
+# (Recommended: still pre-download all six models once on a login node so the 48
+# array tasks hit the shared $HF_HOME cache instead of all downloading at once:
+#   for m in Meta-Llama-3-8B Meta-Llama-3-8B-Instruct Llama-3.1-8B \
+#            Llama-3.1-8B-Instruct Llama-3.2-1B Llama-3.2-1B-Instruct; do
+#     huggingface-cli download meta-llama/$m --quiet; done )
+module load eth_proxy
+# Adjust to your Euler stack if needed (e.g. `module load stack/2024-06 python/3.11.6`).
 source "$SCRATCH/venvs/spider/bin/activate"
+
+# Use vLLM's native sampler: the FlashInfer sampler JIT-needs nvcc, absent on
+# GPU nodes (the worker sets this too, but make it explicit for the job env).
+export VLLM_USE_FLASHINFER_SAMPLER=0
 # --------------------------------------------------------------------------- #
 
 MODEL_SLUGS=(

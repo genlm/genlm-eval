@@ -174,6 +174,11 @@ def build_instances(data_dir: str, few_shot_k: int):
 def run_model(args, hf_id: str, slug: str, is_instruct: bool, instances):
     import gc
 
+    # vLLM's FlashInfer top-k/top-p sampler JIT-compiles a CUDA kernel at runtime,
+    # which requires the CUDA toolkit (nvcc). GPU nodes commonly ship only the
+    # driver, so default to vLLM's native Torch sampler. Export the var to override.
+    os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+
     import torch
     from transformers import AutoTokenizer
     from vllm import LLM, SamplingParams
