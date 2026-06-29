@@ -51,13 +51,47 @@ _COMPILED: Dict[str, List[Tuple[List[str], List[str]]]] = {
 }
 
 
-def _rec(test_idx, passed, output, error_message, error_code, status, time_s):
+# Per-test error codes, the genlm-rollouts executions convention (see livecodebench/capture.py).
+# eval and rollouts share these integer values by contract, not by import.
+OK, WRONG, TLE, RTE, COMPILE, HARNESS = 1, -2, -3, -4, -5, -1
+
+_COMPILE_FAULTS = {
+    Status.BuildFailed,
+    Status.BuildTimeOut,
+    Status.SyntaxError,
+    Status.EmptyCode,
+}
+_RUNTIME_FAULTS = {
+    Status.AbnormalTermination,
+    Status.Exception,
+    Status.ValueError,
+    Status.OutOfMemory,
+}
+
+
+def _error_code(status, passed: bool) -> int:
+    """Per-test outcome to rollouts error_code: 1 ok / -2 wrong / -3 timeout / -4 runtime /
+    -5 compile / -1 harness."""
+    if passed:
+        return OK
+    if status == Status.Done:
+        return WRONG  # ran cleanly, output mismatch
+    if status == Status.TimeoutExpired:
+        return TLE
+    if status in _COMPILE_FAULTS:
+        return COMPILE
+    if status in _RUNTIME_FAULTS:
+        return RTE
+    return HARNESS  # wall-cap ("capped") and anything unclassified
+
+
+def _rec(test_idx, passed, output, error_message, status, time_s):
     return {
         "test_idx": int(test_idx),
         "passed": bool(passed),
         "output": output or "",
         "error_message": error_message or "",
-        "error_code": int(error_code) if error_code is not None else -5,
+        "error_code": _error_code(status, passed),
         "status": str(status),
         "time_s": float(time_s),
     }
@@ -93,17 +127,20 @@ def capture_run(
     grading: str = "exact",
     max_completion_seconds: float = 1e9,
 ) -> Tuple[bool, List[dict]]:
-    """Run every test of one solution and return (solved, per_test_records).
+    """Run every test of one solution and return (solved, per_test_records), no short-circuit.
 
-    Each record: test_idx, passed, output (stdout, untruncated), error_message (stderr),
-    error_code (exit code), status, time_s. `solved` == all(per-test passed), matching the
-    official grader's verdict. A per-completion wall cap (max_completion_seconds) bounds
-    pathological loops: tests past the cap are recorded as not-passed with status "capped".
+    Each record has test_idx, passed, output (untruncated stdout), error_message, error_code
+    (rollouts convention), status, and time_s. `solved` is all(per-test passed). A per-completion
+    wall cap (max_completion_seconds) records tests past the cap as not-passed, status "capped".
     """
     n = len(outputs)
     if not (code or "").strip():
-        recs = [_rec(i, False, "", "Empty string instead of a program", -5, Status.EmptyCode, 0.0)
-                for i in range(n)]
+        recs = [
+            _rec(
+                i, False, "", "Empty string instead of a program", Status.EmptyCode, 0.0
+            )
+            for i in range(n)
+        ]
         return False, recs
 
     code = patch_prog(code, language)
@@ -123,27 +160,37 @@ def capture_run(
             exe = str(path.with_suffix(".exe"))
             run_args, build_err = _build(language, path, exe, sconf)
             if run_args is None:
-                return False, [_rec(i, False, "", build_err, -4, Status.BuildFailed, 0.0)
-                               for i in range(n)]
+                return False, [
+                    _rec(i, False, "", build_err, Status.BuildFailed, 0.0)
+                    for i in range(n)
+                ]
         elif language in _INTERPRETED:
             run_args = [a.format(path=str(path)) for a in _INTERPRETED[language]]
         else:
-            raise NotImplementedError(f"capture_run has no recipe for language {language!r}")
+            raise NotImplementedError(
+                f"capture_run has no recipe for language {language!r}"
+            )
 
         for idx, (inp, exp) in enumerate(zip(inputs, outputs)):
             if time.time() - t_start > max_completion_seconds:
-                recs.append(_rec(idx, False, "", "completion wall cap reached", -1, "capped", 0.0))
+                recs.append(
+                    _rec(idx, False, "", "completion wall cap reached", "capped", 0.0)
+                )
                 continue
             t0 = time.time()
-            res = run(run_args, input_data=inp, timeout_seconds=sconf.run_timeout, sconf=sconf)
+            res = run(
+                run_args, input_data=inp, timeout_seconds=sconf.run_timeout, sconf=sconf
+            )
             dt = time.time() - t0
             out = (res.stdout or "").strip()
             rs = get_run_status(res)
             if rs != Status.Done:
-                recs.append(_rec(idx, False, out, res.stderr, res.exit_code, rs, dt))
+                recs.append(_rec(idx, False, out, res.stderr, rs, dt))
             else:
                 passed = _verdict(out, inp if inp is not None else "", exp, grading)
-                recs.append(_rec(idx, passed, out, "" if passed else res.stderr, 0, rs, dt))
+                recs.append(
+                    _rec(idx, passed, out, "" if passed else res.stderr, rs, dt)
+                )
 
     solved = bool(recs) and all(r["passed"] for r in recs)
     return solved, recs
