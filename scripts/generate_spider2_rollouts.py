@@ -1,36 +1,34 @@
 #!/usr/bin/env python
 """Generate LM rollouts on Spider 2.0-Snow with vLLM (no constrained decoding).
 
-This is a *plain sampling* harness: it reuses only the repo's prompt formatting
-(``SYSTEM_PROMPT`` + ``chat_template_messages``) and the ``Spider2Dataset`` Snow
-loader, then samples completions straight from vLLM.  No ``genlm.control``
-potential / SMC is involved -- these are unconstrained rollouts.
+A *plain sampling* harness over Qwen3 models in both thinking and non-thinking
+modes. It reuses only the repo's prompt formatting (``SYSTEM_PROMPT`` +
+``chat_template_messages``) and the ``Spider2Dataset`` Snow loader, then samples
+completions straight from vLLM. No ``genlm.control`` potential / SMC is involved.
 
-For each model it loads the weights **once** and sweeps every temperature
-(temperature is just a ``SamplingParams`` change, so no reload).  Work is sharded
-over instances via ``--shard-id``/``--num-shards`` so a SLURM job array can spread
-``(model x shard)`` across many GPUs on Euler -- see ``scripts/euler_rollouts.sbatch``.
+Model x mode matrix (6 configs): {Qwen3-1.7B, Qwen3-4B, Qwen3-8B} x {think, nothink}.
+"thinking" toggles Qwen3's hybrid reasoning via the chat template's
+``enable_thinking`` flag; thinking traces are long, so think configs use a larger
+token budget and (by default) fewer samples than nothink.
 
-Few-shot is **adaptive**: each prompt starts from ``--few-shot-k`` examples and
-drops them one at a time until it fits the model's context window (minus
-``--max-tokens``).  This keeps all 3 shots on the 128K-context models while letting
-the 8K Meta-Llama-3-8B fall back to fewer shots instead of crashing.
+Context: Qwen3 dense models are 40,960-token native, below Snow's ~80k-token
+schemas, so YaRN rope-scaling is enabled by default (``--yarn-factor 4``) to reach
+~131k. Few-shot is adaptive: each prompt starts from ``--few-shot-k`` examples and
+drops them until it fits the (scaled) context.
 
-Output: one JSONL per ``(model, temperature, shard)`` under
-``<out-dir>/<model-slug>/``, one line per instance::
+For each config it loads the model once and sweeps every temperature. Work is
+sharded over instances via ``--shard-id``/``--num-shards`` so a SLURM array can
+fan ``(config x shard)`` across many GPUs (see ``scripts/euler_rollouts.sbatch``).
 
-    {"spider2_instance_id", "instance_id", "db", "gold", "model", "temperature",
-     "n", "n_shots", "prompt_tokens", "generations": [...], "finish_reasons": [...]}
+Output: one JSONL per ``(config, temperature, shard)`` under
+``<out-dir>/<config-slug>/``, one line per instance with the gold SQL and db
+carried through for later scoring with ``Spider2Evaluator``.
 
-The gold SQL and ``db`` are carried through so the rollouts can be scored later
-with ``Spider2Evaluator`` without re-loading the dataset.
-
-Example (single model, single shard, local debug)::
+Example (single config, debug)::
 
     python scripts/generate_spider2_rollouts.py \\
-        --data-dir /path/to/spider2-snow \\
-        --models llama3.2-1b-instruct \\
-        --samples 100 --limit 8 --num-shards 1 --shard-id 0
+        --data-dir /path/to/spider2-snow --models qwen3-1.7b-nothink \\
+        --samples 100 --think-samples 20 --limit 8 --num-shards 1 --shard-id 0
 """
 
 from __future__ import annotations
@@ -43,44 +41,37 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-# (HF model id, output slug, is_instruct).  Edit ids here if your hub mirror differs.
+# (HF model id, output slug, thinking).  All are Qwen3 chat models.
 MODELS: list[tuple[str, str, bool]] = [
-    ("meta-llama/Meta-Llama-3-8B", "llama3-8b", False),
-    ("meta-llama/Meta-Llama-3-8B-Instruct", "llama3-8b-instruct", True),
-    ("meta-llama/Llama-3.1-8B", "llama3.1-8b", False),
-    ("meta-llama/Llama-3.1-8B-Instruct", "llama3.1-8b-instruct", True),
-    ("meta-llama/Llama-3.2-1B", "llama3.2-1b", False),
-    ("meta-llama/Llama-3.2-1B-Instruct", "llama3.2-1b-instruct", True),
+    ("Qwen/Qwen3-4B", "qwen3-4b-think", True),
+    ("Qwen/Qwen3-4B", "qwen3-4b-nothink", False),
+    ("Qwen/Qwen3-8B", "qwen3-8b-think", True),
+    ("Qwen/Qwen3-8B", "qwen3-8b-nothink", False),
+    ("Qwen/Qwen3-1.7B", "qwen3-1.7b-think", True),
+    ("Qwen/Qwen3-1.7B", "qwen3-1.7b-nothink", False),
 ]
-MODELS_BY_SLUG = {slug: (hf_id, slug, instruct) for hf_id, slug, instruct in MODELS}
+MODELS_BY_SLUG = {slug: (hf_id, slug, think) for hf_id, slug, think in MODELS}
 
 DEFAULT_TEMPERATURES = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
 
+# Qwen3 dense models' native max_position_embeddings (used as the YaRN base).
+QWEN3_NATIVE_CTX = 40960
+
 
 # --------------------------------------------------------------------------- #
-# Prompt construction (mirrors spider2.default_prompt_formatter, as a string)  #
+# Prompt construction (chat template, with Qwen3 thinking toggle)              #
 # --------------------------------------------------------------------------- #
 
 
-def _base_prompt(system_prompt: str, few_shot, user_message: str) -> str:
-    """Raw-completion prompt for base (non-instruct) models, ``k`` shots."""
-    parts = [system_prompt]
-    if few_shot:
-        parts.append(
-            "\n\n".join(f"{inp}\nSQL query: {out}" for inp, out in few_shot)
-        )
-    parts.append(user_message + "\nSQL query:")
-    return "\n\n".join(parts)
-
-
-def _chat_prompt(tokenizer, system_prompt: str, few_shot, user_message: str) -> str:
-    """Chat-template prompt string for instruct models, ``k`` shots."""
+def _chat_prompt(tokenizer, system_prompt, few_shot, user_message, *, thinking):
+    """Chat-template prompt string. ``thinking`` toggles Qwen3 reasoning."""
     from genlm.eval.util import chat_template_messages
 
     return tokenizer.apply_chat_template(
         chat_template_messages(system_prompt, list(few_shot), user_message),
         tokenize=False,
         add_generation_prompt=True,
+        enable_thinking=thinking,
     )
 
 
@@ -95,8 +86,8 @@ def fit_prompt(
     tokenizer,
     instance,
     *,
-    is_instruct: bool,
     system_prompt: str,
+    thinking: bool,
     max_shots: int,
     cap_tokens: int,
 ) -> FittedPrompt | None:
@@ -106,26 +97,29 @@ def fit_prompt(
     """
     examples = instance.few_shot_examples[:max_shots]
     for k in range(len(examples), -1, -1):
-        shots = examples[:k]
-        if is_instruct:
-            text = _chat_prompt(tokenizer, system_prompt, shots, instance.user_message)
-            # The chat template already injects BOS/headers; don't double-count.
-            n_tok = len(tokenizer(text, add_special_tokens=False).input_ids)
-        else:
-            text = _base_prompt(system_prompt, shots, instance.user_message)
-            n_tok = len(tokenizer(text, add_special_tokens=True).input_ids)
+        text = _chat_prompt(
+            tokenizer,
+            system_prompt,
+            examples[:k],
+            instance.user_message,
+            thinking=thinking,
+        )
+        # The chat template already injects special tokens; don't double-count.
+        n_tok = len(tokenizer(text, add_special_tokens=False).input_ids)
         if n_tok <= cap_tokens:
             return FittedPrompt(text=text, n_shots=k, prompt_tokens=n_tok)
     return None
 
 
 # --------------------------------------------------------------------------- #
-# Main per-model generation                                                    #
+# Main per-config generation                                                   #
 # --------------------------------------------------------------------------- #
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--data-dir", required=True, help="Path to the spider2-snow directory.")
     p.add_argument("--out-dir", default="rollouts/spider2-snow", help="Output root.")
     p.add_argument(
@@ -133,12 +127,18 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         default=[s for _, s, _ in MODELS],
         choices=[s for _, s, _ in MODELS],
-        help="Model slug(s) to run. Default: all six.",
+        help="Config slug(s) to run. Default: all six.",
     )
-    p.add_argument("--samples", type=int, default=100, help="Samples per instance at t>0 (t=0 is always 1, greedy).")
+    p.add_argument("--samples", type=int, default=100, help="Samples/instance at t>0 (nothink).")
+    p.add_argument("--think-samples", type=int, default=20, help="Samples/instance at t>0 (think).")
     p.add_argument("--temperatures", type=float, nargs="+", default=DEFAULT_TEMPERATURES)
-    p.add_argument("--few-shot-k", type=int, default=3, help="Max few-shot examples (adaptively reduced to fit context).")
-    p.add_argument("--max-tokens", type=int, default=2048, help="Max new tokens per generation.")
+    p.add_argument("--few-shot-k", type=int, default=3, help="Max few-shot examples (adaptively reduced).")
+    p.add_argument("--max-tokens", type=int, default=1024, help="Max new tokens (nothink).")
+    p.add_argument("--think-max-tokens", type=int, default=8192, help="Max new tokens (think).")
+    # Context / YaRN (Qwen3 dense is 40960 native; Snow schemas are ~80k).
+    p.add_argument("--max-model-len", type=int, default=131072, help="Engine context length.")
+    p.add_argument("--yarn-factor", type=float, default=4.0, help="YaRN scaling factor; <=1 disables.")
+    p.add_argument("--yarn-orig", type=int, default=QWEN3_NATIVE_CTX, help="YaRN original context.")
     # Instance sharding for SLURM job arrays.
     p.add_argument("--num-shards", type=int, default=1)
     p.add_argument("--shard-id", type=int, default=0)
@@ -146,7 +146,6 @@ def parse_args() -> argparse.Namespace:
     # vLLM engine knobs.
     p.add_argument("--tensor-parallel-size", type=int, default=1)
     p.add_argument("--gpu-memory-utilization", type=float, default=0.90)
-    p.add_argument("--max-model-len", type=int, default=None, help="Override engine context length.")
     p.add_argument("--dtype", default="bfloat16")
     p.add_argument("--seed", type=int, default=0, help="Sampling seed (reproducible reruns).")
     p.add_argument("--safety-margin", type=int, default=16, help="Token slack left below the context cap.")
@@ -171,7 +170,7 @@ def build_instances(data_dir: str, few_shot_k: int):
     return instances, sorted(few_shot_set)
 
 
-def run_model(args, hf_id: str, slug: str, is_instruct: bool, instances):
+def run_model(args, hf_id: str, slug: str, thinking: bool, instances):
     import gc
 
     # vLLM's FlashInfer top-k/top-p sampler JIT-compiles a CUDA kernel at runtime,
@@ -185,10 +184,29 @@ def run_model(args, hf_id: str, slug: str, is_instruct: bool, instances):
 
     from genlm.eval.domains.spider2.spider2 import SYSTEM_PROMPT
 
+    max_tokens = args.think_max_tokens if thinking else args.max_tokens
+    n_samples = args.think_samples if thinking else args.samples
+
     out_dir = Path(args.out_dir) / slug
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[{slug}] loading {hf_id} (tp={args.tensor_parallel_size}) ...", flush=True)
+    # YaRN context extension so the ~80k-token Snow schemas fit (Qwen3 is 40960
+    # native). Applied as a static rope-scaling override at load time.
+    hf_overrides = None
+    if args.yarn_factor and args.yarn_factor > 1.0:
+        hf_overrides = {
+            "rope_scaling": {
+                "rope_type": "yarn",
+                "factor": args.yarn_factor,
+                "original_max_position_embeddings": args.yarn_orig,
+            }
+        }
+
+    print(
+        f"[{slug}] loading {hf_id} (thinking={thinking}, max_tokens={max_tokens}, "
+        f"n={n_samples}, max_model_len={args.max_model_len}, yarn={hf_overrides is not None})",
+        flush=True,
+    )
     tokenizer = AutoTokenizer.from_pretrained(hf_id)
     llm = LLM(
         model=hf_id,
@@ -197,9 +215,10 @@ def run_model(args, hf_id: str, slug: str, is_instruct: bool, instances):
         max_model_len=args.max_model_len,
         dtype=args.dtype,
         seed=args.seed,
+        hf_overrides=hf_overrides,
     )
     ctx = getattr(llm.llm_engine.model_config, "max_model_len", None) or args.max_model_len
-    cap = ctx - args.max_tokens - args.safety_margin
+    cap = ctx - max_tokens - args.safety_margin
     print(f"[{slug}] context={ctx}, prompt budget={cap} tokens", flush=True)
 
     # Build (and fit) prompts once; they are temperature-independent.
@@ -209,8 +228,8 @@ def run_model(args, hf_id: str, slug: str, is_instruct: bool, instances):
         fitted = fit_prompt(
             tokenizer,
             inst,
-            is_instruct=is_instruct,
             system_prompt=SYSTEM_PROMPT,
+            thinking=thinking,
             max_shots=args.few_shot_k,
             cap_tokens=cap,
         )
@@ -229,11 +248,10 @@ def run_model(args, hf_id: str, slug: str, is_instruct: bool, instances):
     if skipped:
         print(f"[{slug}] skipped ids: {skipped}", flush=True)
 
-    stop = ["Here is a database schema:"] if not is_instruct else None
     prompt_texts = [fp.text for fp in prompts]
 
     for temp in args.temperatures:
-        n = 1 if temp == 0.0 else args.samples
+        n = 1 if temp == 0.0 else n_samples
         shard_tag = f"shard{args.shard_id:03d}-of{args.num_shards:03d}"
         out_path = out_dir / f"{slug}__t{temp:.1f}__{shard_tag}.jsonl"
         if out_path.exists() and not args.overwrite:
@@ -244,8 +262,7 @@ def run_model(args, hf_id: str, slug: str, is_instruct: bool, instances):
             n=n,
             temperature=temp,
             top_p=1.0,  # pure temperature sampling, no nucleus truncation
-            max_tokens=args.max_tokens,
-            stop=stop,
+            max_tokens=max_tokens,
             seed=args.seed,
         )
         t0 = time.time()
@@ -263,8 +280,10 @@ def run_model(args, hf_id: str, slug: str, is_instruct: bool, instances):
                             "db": inst.schema_name,
                             "gold": inst.gold,
                             "model": hf_id,
+                            "thinking": thinking,
                             "temperature": temp,
                             "n": n,
+                            "max_tokens": max_tokens,
                             "n_shots": fp.n_shots,
                             "prompt_tokens": fp.prompt_tokens,
                             "generations": [o.text.strip() for o in out.outputs],
@@ -279,7 +298,7 @@ def run_model(args, hf_id: str, slug: str, is_instruct: bool, instances):
             flush=True,
         )
 
-    # Free the GPU before the next model in this process (if any).
+    # Free the GPU before the next config in this process (if any).
     del llm
     gc.collect()
     if torch.cuda.is_available():
@@ -304,13 +323,13 @@ def main() -> None:
 
     print(
         f"shard {args.shard_id}/{args.num_shards}: {len(instances)} instances "
-        f"(few-shot pool excluded: {few_shot_ids}); models={args.models}",
+        f"(few-shot pool excluded: {few_shot_ids}); configs={args.models}",
         flush=True,
     )
 
     for slug in args.models:
-        hf_id, _, is_instruct = MODELS_BY_SLUG[slug]
-        run_model(args, hf_id, slug, is_instruct, instances)
+        hf_id, _, thinking = MODELS_BY_SLUG[slug]
+        run_model(args, hf_id, slug, thinking, instances)
 
 
 if __name__ == "__main__":
