@@ -91,6 +91,12 @@ test = [
     "pytest-cov",
 ]
 
+# Unconstrained vLLM rollout generation (scripts/generate_spider2_rollouts.py).
+rollouts = [
+    "vllm",
+    "transformers",
+]
+
 docs = [
     "mkdocs",
     "mkdocs-jupyter",
