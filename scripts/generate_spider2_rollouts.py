@@ -331,6 +331,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--yarn-orig", type=int, default=QWEN3_NATIVE_CTX)
     p.add_argument("--num-shards", type=int, default=1)
     p.add_argument("--shard-id", type=int, default=0)
+    p.add_argument("--only-ids", default=None, help="Comma-separated instance_ids (recovery): generate only these, ignore sharding, write a 'recover'-tagged file.")
     p.add_argument("--limit", type=int, default=None, help="Debug: first N (post-shard) instances.")
     p.add_argument("--tensor-parallel-size", type=int, default=1)
     p.add_argument("--gpu-memory-utilization", type=float, default=0.90)
@@ -454,7 +455,7 @@ def run_model(args, hf_id, slug, thinking, gen, few_shot):
 
     for temp in args.temperatures:
         n = 1 if temp == 0.0 else n_samples
-        shard_tag = f"shard{args.shard_id:03d}-of{args.num_shards:03d}"
+        shard_tag = "recover" if args.only_ids else f"shard{args.shard_id:03d}-of{args.num_shards:03d}"
         out_path = out_dir / f"{slug}__t{temp:.1f}__{shard_tag}.jsonl"
         if out_path.exists() and not args.overwrite:
             print(f"[{slug}] t={temp}: exists, skipping ({out_path.name})", flush=True)
@@ -516,12 +517,17 @@ def main() -> None:
     gen, few_shot, pool_ids = prepare(
         args.data_dir, args.few_shot_k, args.schema_scope, args.link_top_k
     )
-    gen = _shard(gen, args.shard_id, args.num_shards, args.limit)
-    print(
-        f"shard {args.shard_id}/{args.num_shards}: {len(gen)} instances "
-        f"(few-shot pool excluded: {pool_ids}); scope={args.schema_scope}; configs={args.models}",
-        flush=True,
-    )
+    if args.only_ids:
+        want = {int(x) for x in args.only_ids.split(",")}
+        gen = [g for g in gen if g.instance_id in want]
+        print(f"recovery: {len(gen)} instances {sorted(g.instance_id for g in gen)}", flush=True)
+    else:
+        gen = _shard(gen, args.shard_id, args.num_shards, args.limit)
+        print(
+            f"shard {args.shard_id}/{args.num_shards}: {len(gen)} instances "
+            f"(few-shot pool excluded: {pool_ids}); scope={args.schema_scope}; configs={args.models}",
+            flush=True,
+        )
 
     if args.dry_run:
         dry_run(args, gen, few_shot)
