@@ -46,6 +46,7 @@ FEW_SHOT_K=3
 MAX_MODEL_LEN=40960                         # Qwen3 native; BM25 prompts fit, no YaRN
 YARN_FACTOR=1.0                             # disabled
 TEMPERATURES="0.6"                          # single operating point for now
+TP="${TP:-1}"                               # tensor-parallel size (export TP=2 for 8B on 2x4090)
 
 export HF_HOME="$SCRATCH/hf_cache"
 export HF_TOKEN="${HF_TOKEN:?set HF_TOKEN}"
@@ -97,6 +98,6 @@ srun python scripts/generate_spider2_rollouts.py \
   --yarn-factor "$YARN_FACTOR" \
   --num-shards "$NUM_SHARDS" \
   --shard-id "$SHARD_ID" \
-  --tensor-parallel-size 1 \
+  --tensor-parallel-size "$TP" \
   --gpu-memory-utilization 0.90 \
   --seed 0
