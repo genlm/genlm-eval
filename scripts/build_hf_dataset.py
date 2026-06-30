@@ -3,9 +3,10 @@
 
 Reads the per-(config, temperature, shard) rollout JSONL files and emits:
 
-* ``rollouts`` config -- one row per generation:
-    model, thinking, temp, instance_id, sample, generation, extracted_sql,
-    finish, n_tokens, eval (null until scored)
+* ``rollouts`` config -- one row per generation (column names follow Samuel's
+  temperature-sweep dataset for cross-analysis):
+    model, thinking, temp, instance_id, sample, text, extracted_sql, finish,
+    n_tokens, n_shots, passed, score, valid (eval labels null until scored)
 * ``schemas`` config -- one row per instance:
     instance_id, db, question, linked_schema, linked_tables, n_linked_tables,
     external_knowledge
@@ -77,12 +78,15 @@ def build_rollout_rows(rollouts_dir: str, tokenizer):
                             "temp": float(r["temperature"]),
                             "instance_id": r["spider2_instance_id"],
                             "sample": base + j,
-                            "generation": g,
+                            "text": g,
                             "extracted_sql": extract_sql(g),
                             "finish": fins[j] if j < len(fins) else None,
                             "n_tokens": ntoks[j] if j < len(ntoks) else None,
                             "n_shots": r.get("n_shots"),
-                            "eval": None,
+                            # eval label (Samuel's convention); null until scored
+                            "passed": None,
+                            "score": None,
+                            "valid": None,
                         }
                     )
                 counters[key] = base + len(gens)
