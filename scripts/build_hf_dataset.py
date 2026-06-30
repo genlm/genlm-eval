@@ -42,6 +42,19 @@ def extract_sql(text: str) -> str:
     return text.strip()
 
 
+def split_think(text: str):
+    """Split a generation into (reasoning, answer) around the </think> tag.
+
+    Non-thinking generations have no think block, so reasoning is empty and the
+    whole text is the answer.
+    """
+    if "</think>" in text:
+        head, _, answer = text.partition("</think>")
+        reasoning = head.split("<think>", 1)[-1] if "<think>" in head else head
+        return reasoning, answer
+    return "", text
+
+
 def _load_gen_module():
     here = Path(__file__).resolve().parent
     spec = importlib.util.spec_from_file_location(
@@ -67,7 +80,17 @@ def build_rollout_rows(rollouts_dir: str, tokenizer):
                 r = json.loads(line)
                 gens = r["generations"]
                 fins = r["finish_reasons"]
-                ntoks = [len(x) for x in tokenizer(gens).input_ids] if gens else []
+                esqls = [extract_sql(g) for g in gens]
+                splits = [split_think(g) for g in gens]
+                reasoning = [s[0] for s in splits]
+                answer = [s[1] for s in splits]
+
+                def _ntok(strs):
+                    return [len(x) for x in tokenizer(strs, add_special_tokens=False).input_ids] if strs else []
+
+                ntoks = _ntok(gens)
+                nreason = _ntok(reasoning)
+                nanswer = _ntok(answer)
                 key = (r["model"], bool(r["thinking"]), float(r["temperature"]), r["spider2_instance_id"])
                 base = counters.get(key, 0)
                 for j, g in enumerate(gens):
@@ -79,9 +102,13 @@ def build_rollout_rows(rollouts_dir: str, tokenizer):
                             "instance_id": r["spider2_instance_id"],
                             "sample": base + j,
                             "text": g,
-                            "extracted_sql": extract_sql(g),
+                            "extracted_sql": esqls[j],
                             "finish": fins[j] if j < len(fins) else None,
                             "n_tokens": ntoks[j] if j < len(ntoks) else None,
+                            "n_reasoning_tokens": nreason[j] if j < len(nreason) else None,
+                            "n_answer_tokens": nanswer[j] if j < len(nanswer) else None,
+                            "thinking_closed": "</think>" in g,
+                            "has_sql": bool(esqls[j].strip()),
                             "n_shots": r.get("n_shots"),
                             # eval label (Samuel's convention); null until scored
                             "passed": None,
