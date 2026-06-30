@@ -332,6 +332,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--num-shards", type=int, default=1)
     p.add_argument("--shard-id", type=int, default=0)
     p.add_argument("--only-ids", default=None, help="Comma-separated instance_ids (recovery): generate only these, ignore sharding, write a 'recover'-tagged file.")
+    p.add_argument("--run-tag", default="", help="Suffix appended to output filenames (e.g. 'extra80') so an additional run does not clobber an existing one.")
     p.add_argument("--limit", type=int, default=None, help="Debug: first N (post-shard) instances.")
     p.add_argument("--tensor-parallel-size", type=int, default=1)
     p.add_argument("--gpu-memory-utilization", type=float, default=0.90)
@@ -456,6 +457,8 @@ def run_model(args, hf_id, slug, thinking, gen, few_shot):
     for temp in args.temperatures:
         n = 1 if temp == 0.0 else n_samples
         shard_tag = "recover" if args.only_ids else f"shard{args.shard_id:03d}-of{args.num_shards:03d}"
+        if args.run_tag:
+            shard_tag = f"{shard_tag}__{args.run_tag}"
         out_path = out_dir / f"{slug}__t{temp:.1f}__{shard_tag}.jsonl"
         if out_path.exists() and not args.overwrite:
             print(f"[{slug}] t={temp}: exists, skipping ({out_path.name})", flush=True)

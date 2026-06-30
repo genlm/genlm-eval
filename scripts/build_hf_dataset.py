@@ -53,7 +53,11 @@ def _load_gen_module():
 
 
 def build_rollout_rows(rollouts_dir: str, tokenizer):
+    """One row per generation. ``sample`` is a per-(model,thinking,temp,instance)
+    running counter, so generations split across files (base shards + a tagged
+    extra run + recovery) merge into 0..N-1 without collisions."""
     rows = []
+    counters: dict = {}
     for fp in sorted(glob.glob(f"{rollouts_dir}/*/*__t*__*.jsonl")):
         with open(fp) as f:
             for line in f:
@@ -63,21 +67,24 @@ def build_rollout_rows(rollouts_dir: str, tokenizer):
                 gens = r["generations"]
                 fins = r["finish_reasons"]
                 ntoks = [len(x) for x in tokenizer(gens).input_ids] if gens else []
-                for i, g in enumerate(gens):
+                key = (r["model"], bool(r["thinking"]), float(r["temperature"]), r["spider2_instance_id"])
+                base = counters.get(key, 0)
+                for j, g in enumerate(gens):
                     rows.append(
                         {
                             "model": r["model"],
                             "thinking": bool(r["thinking"]),
                             "temp": float(r["temperature"]),
                             "instance_id": r["spider2_instance_id"],
-                            "sample": i,
+                            "sample": base + j,
                             "generation": g,
                             "extracted_sql": extract_sql(g),
-                            "finish": fins[i] if i < len(fins) else None,
-                            "n_tokens": ntoks[i] if i < len(ntoks) else None,
+                            "finish": fins[j] if j < len(fins) else None,
+                            "n_tokens": ntoks[j] if j < len(ntoks) else None,
                             "eval": None,
                         }
                     )
+                counters[key] = base + len(gens)
     return rows
 
 

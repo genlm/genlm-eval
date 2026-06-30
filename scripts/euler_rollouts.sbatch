@@ -38,8 +38,10 @@ DATA_DIR="$SCRATCH/Spider2/spider2-snow"
 OUT_DIR="$SCRATCH/rollouts/snow_bm25"      # reused: completed shards are skipped
 SCHEMA_SCOPE=bm25
 LINK_TOP_K=10
-SAMPLES=100                                 # nothink samples/instance at t>0
-THINK_SAMPLES=20                            # think samples/instance at t>0
+SAMPLES="${SAMPLES:-100}"                    # nothink samples/instance at t>0
+THINK_SAMPLES="${THINK_SAMPLES:-20}"         # think samples/instance at t>0
+SEED="${SEED:-0}"                            # change for an independent extra batch
+RUN_TAG="${RUN_TAG:-}"                       # output filename suffix for extra runs
 MAX_TOKENS=1024                             # nothink generation budget
 THINK_MAX_TOKENS=8192                       # think generation budget
 FEW_SHOT_K=3
@@ -98,6 +100,7 @@ srun python scripts/generate_spider2_rollouts.py \
   --yarn-factor "$YARN_FACTOR" \
   --num-shards "$NUM_SHARDS" \
   --shard-id "$SHARD_ID" \
+  --run-tag "$RUN_TAG" \
   --tensor-parallel-size "$TP" \
   --gpu-memory-utilization 0.90 \
-  --seed 0
+  --seed "$SEED"
