@@ -1,4 +1,4 @@
-from .utils import CHAT, OFFICIAL, _postprocess_code
+from .utils import CHAT, OFFICIAL, _postprocess_code, unwrap_redeclared_function
 
 # The evaluator and potential pull genlm.control -> torch/vLLM (a ~270s import). Load them
 # lazily so importing the lightweight postprocess (OFFICIAL/CHAT/_postprocess_code) does not
@@ -34,4 +34,5 @@ __all__ = [
     "OFFICIAL",
     "CHAT",
     "_postprocess_code",
+    "unwrap_redeclared_function",
 ]

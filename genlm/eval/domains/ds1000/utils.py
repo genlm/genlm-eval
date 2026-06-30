@@ -1,3 +1,4 @@
+import ast
 import os
 import re
 
@@ -49,7 +50,10 @@ def _postprocess_chat(t: str) -> str:
     # official (raw unchanged).
     # Do not dedent: a function-body answer is indented under its `def`, and stripping
     # that indent breaks the insertion.
-    t = _strip_reasoning(t.split("</code>")[0])
+    # Strip reasoning before the </code> cut: a </think> trace can itself contain a </code>
+    # token, and cutting on that first would discard the real (post-</think>) answer and leave
+    # a fenced block from the reasoning.
+    t = _strip_reasoning(t).split("</code>")[0]
     blocks = re.findall(r"```(?:python)?[ \t]*\n(.*?)```", t, re.S)
     if blocks:
         t = blocks[-1]
@@ -59,6 +63,47 @@ def _postprocess_chat(t: str) -> str:
     t = t.split("# SOLUTION END")[0]
     t = t.split("\nEND SOLUTION")[0]
     return t.replace("<code>", "")
+
+
+def _insert_slot_def(code_context: str) -> "str | None":
+    """The `def NAME(...):` header on the line immediately preceding the `[insert]` slot in a
+    DS-1000 code_context, or None when the slot is not a function body. DS-1000 insertion-type
+    problems open `def f(df):` and expect the *indented body* at `[insert]`."""
+    i = code_context.find("[insert]")
+    if i < 0:
+        return None
+    for line in reversed(code_context[:i].splitlines()):
+        if not line.strip():
+            continue
+        s = line.strip()
+        return s if s.startswith("def ") and s.endswith(":") else None
+    return None
+
+
+def unwrap_redeclared_function(solution: str, code_context: str) -> str:
+    """If the model answered a DS-1000 body-insertion slot with a *standalone* function that
+    re-declares the one the slot already opens (`def f(df):` template + `def f(df): ...` answer),
+    return just the function body so insertion doesn't `IndentationError`. Conservative: fires
+    only when the slot is a `def`, the solution is one top-level FunctionDef, and the names match.
+    Otherwise returns the solution unchanged, preserving a bare-body answer's indentation. See
+    genlm/rollouts issue #18."""
+    head = _insert_slot_def(code_context)
+    if not head:
+        return solution
+    slot_name = head[4:head.find("(")].strip()
+    try:
+        tree = ast.parse(solution)
+    except SyntaxError:
+        return solution
+    if len(tree.body) == 1 and isinstance(tree.body[0], ast.FunctionDef):
+        fn = tree.body[0]
+        if fn.name == slot_name and fn.body:
+            lines = solution.splitlines()
+            body = "\n".join(lines[fn.body[0].lineno - 1:])
+            # DS-1000 bodies are uniformly indented under the slot's `def`, so the body keeps
+            # its own valid indentation; return as-is.
+            return body if body.strip() else solution
+    return solution
 
 
 # Postprocess strategies (final-answer extraction): OFFICIAL keeps everything before the

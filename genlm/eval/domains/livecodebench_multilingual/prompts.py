@@ -118,3 +118,46 @@ def format_multilingual_prompt(
         return tokenizer.encode(text, add_special_tokens=False)
     text = f"{messages[0]['content']}\n\n{messages[1]['content']}"
     return tokenizer.encode(text)
+
+
+def chat_messages(instance) -> List[Dict[str, str]]:
+    """Chat messages for ``instance`` in its source's prompt style: Multi-LCB languages get the
+    Multi-LCB prompt, Agnostics low-resource languages get the Agnostics prompt with the
+    per-language nudge. Prefer this over the style-specific builders so each prompt matches its
+    dataset."""
+    lang = resolve_language(instance.language)
+    if lang.source == "agnostics":
+        msgs = agnostics_chat_messages(instance)
+        if lang.prompt_nudge:
+            msgs = [{**msgs[0], "content": msgs[0]["content"] + "\n" + lang.prompt_nudge}]
+        return msgs
+    return multilingual_chat_messages(instance)
+
+
+def default_grading(language) -> str:
+    """Grading comparator matching each prompt source: ``exact`` (Agnostics rstrip-equality) for the
+    Agnostics low-resource languages, ``lenient`` (Multi-LCB per-line comparator) otherwise."""
+    return "exact" if resolve_language(language).source == "agnostics" else "lenient"
+
+
+def format_prompt(
+    tokenizer,
+    instance,
+    use_chat_format: bool = False,
+    enable_thinking: bool | None = None,
+) -> List[int]:
+    """Source-correct token ids for ``instance`` (Multi-LCB or Agnostics prompt by language source).
+
+    The generation-side analogue of ``format_multilingual_prompt`` but style-selecting via
+    ``chat_messages``. ``enable_thinking=None`` omits the toggle for models without a thinking mode.
+    """
+    messages = chat_messages(instance)
+    if use_chat_format and tokenizer is not None:
+        kw = {} if enable_thinking is None else {"enable_thinking": enable_thinking}
+        text = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True, **kw
+        )
+        return tokenizer.encode(text, add_special_tokens=False)
+    # raw-completion fallback: agnostics carries one (user) message, Multi-LCB two (system+user)
+    text = "\n\n".join(m["content"] for m in messages)
+    return tokenizer.encode(text)
