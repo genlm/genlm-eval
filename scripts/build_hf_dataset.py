@@ -81,6 +81,7 @@ def build_rollout_rows(rollouts_dir: str, tokenizer):
                             "extracted_sql": extract_sql(g),
                             "finish": fins[j] if j < len(fins) else None,
                             "n_tokens": ntoks[j] if j < len(ntoks) else None,
+                            "n_shots": r.get("n_shots"),
                             "eval": None,
                         }
                     )
