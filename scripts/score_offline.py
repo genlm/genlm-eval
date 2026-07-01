@@ -64,6 +64,11 @@ def analyze(sql: str, schema: dict) -> dict:
     }
     if not sql or not sql.strip():
         return res
+    # Degenerate `length`-truncated generations (tens of thousands of chars of
+    # repetition) make sqlglot's parser hang. They're invalid anyway, so skip
+    # parsing past a generous cap and leave parse_valid=False.
+    if len(sql) > 20000:
+        return res
     try:
         tree = sqlglot.parse_one(sql, dialect="snowflake")
     except Exception:
