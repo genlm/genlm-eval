@@ -168,7 +168,8 @@ def main():
     ap.add_argument("--private", action="store_true")
     args = ap.parse_args()
 
-    from datasets import Dataset
+    import pyarrow as pa
+    import pyarrow.parquet as pq
     from transformers import AutoTokenizer
 
     tok = AutoTokenizer.from_pretrained("Qwen/Qwen3-1.7B")  # shared Qwen3 tokenizer
@@ -184,20 +185,32 @@ def main():
         print(f"sample schema row: instance={s0['instance_id']} db={s0['db']} "
               f"n_linked_tables={s0['n_linked_tables']} tables={s0['linked_tables'][:5]}", flush=True)
 
-    ds_roll = Dataset.from_list(roll)
-    ds_sch = Dataset.from_list(sch)
-
-    if args.out:
-        Path(args.out).mkdir(parents=True, exist_ok=True)
-        ds_roll.to_parquet(f"{args.out}/rollouts.parquet")
-        ds_sch.to_parquet(f"{args.out}/schemas.parquet")
-        print(f"wrote parquet to {args.out}", flush=True)
+    # Build the Arrow table directly with pyarrow. datasets.Dataset.from_list is
+    # pathologically slow on hundreds of thousands of long-text rows (it stalled
+    # indefinitely at ~324k); pa.Table.from_pylist is C-level and takes seconds.
+    roll_schema = pa.schema([
+        ("model", pa.string()), ("thinking", pa.bool_()), ("temp", pa.float64()),
+        ("instance_id", pa.string()), ("sample", pa.int64()), ("text", pa.string()),
+        ("extracted_sql", pa.string()), ("finish", pa.string()), ("n_tokens", pa.int64()),
+        ("n_reasoning_tokens", pa.int64()), ("n_answer_tokens", pa.int64()),
+        ("thinking_closed", pa.bool_()), ("has_sql", pa.bool_()), ("n_shots", pa.int64()),
+        ("passed", pa.bool_()), ("score", pa.float64()), ("valid", pa.bool_()),
+    ])
+    if not args.out:
+        raise SystemExit("--out is required (parquet is written first, then pushed)")
+    Path(args.out).mkdir(parents=True, exist_ok=True)
+    pq.write_table(pa.Table.from_pylist(roll, schema=roll_schema), f"{args.out}/rollouts.parquet")
+    pq.write_table(pa.Table.from_pylist(sch), f"{args.out}/schemas.parquet")
+    print(f"wrote parquet to {args.out} (rollouts={len(roll)}, schemas={len(sch)})", flush=True)
 
     if args.push:
         if not args.repo:
             raise SystemExit("--push requires --repo")
-        ds_roll.push_to_hub(args.repo, config_name="rollouts", private=args.private)
-        ds_sch.push_to_hub(args.repo, config_name="schemas", private=args.private)
+        from datasets import Dataset
+        Dataset.from_parquet(f"{args.out}/rollouts.parquet").push_to_hub(
+            args.repo, config_name="rollouts", private=args.private)
+        Dataset.from_parquet(f"{args.out}/schemas.parquet").push_to_hub(
+            args.repo, config_name="schemas", private=args.private)
         print(f"pushed to https://huggingface.co/datasets/{args.repo}", flush=True)
 
 
