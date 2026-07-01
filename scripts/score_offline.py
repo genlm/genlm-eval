@@ -24,9 +24,24 @@ pushes the updated ``rollouts`` config. Requires no re-tokenization.
 from __future__ import annotations
 
 import argparse
+import signal
 
 import sqlglot
 from sqlglot import exp
+
+
+class _ParseTimeout(Exception):
+    pass
+
+
+def _on_alarm(signum, frame):
+    raise _ParseTimeout()
+
+
+# Per-row parse cap: sqlglot can parse some degenerate generations exponentially
+# (even under the length cap), which wedges the .map. SIGALRM aborts any single
+# parse that runs long. Works in datasets' forked map workers (Linux).
+signal.signal(signal.SIGALRM, _on_alarm)
 
 
 def schema_map_from_ddl(ddl_text: str) -> dict:
@@ -62,44 +77,42 @@ def analyze(sql: str, schema: dict) -> dict:
         "n_ref_columns": None,
         "n_unknown_columns": None,
     }
-    if not sql or not sql.strip():
-        return res
-    # Degenerate `length`-truncated generations (tens of thousands of chars of
-    # repetition) make sqlglot's parser hang. They're invalid anyway, so skip
-    # parsing past a generous cap and leave parse_valid=False.
-    if len(sql) > 20000:
+    if not sql or not sql.strip() or len(sql) > 20000:
         return res
     try:
+        signal.setitimer(signal.ITIMER_REAL, 3.0)  # abort a pathological parse
         tree = sqlglot.parse_one(sql, dialect="snowflake")
+        if tree is None:
+            return res
+        res["parse_valid"] = True
+
+        prov_tables = set(schema.keys())
+        prov_cols = set().union(*schema.values()) if schema else set()
+
+        cte_names = {c.alias_or_name.lower() for c in tree.find_all(exp.CTE) if c.alias_or_name}
+        ref_tables = {(t.name or "").lower() for t in tree.find_all(exp.Table) if t.name}
+        ref_tables -= cte_names
+        ref_tables.discard("")
+        unknown_t = ref_tables - prov_tables
+
+        ref_cols = {(c.name or "").lower() for c in tree.find_all(exp.Column) if c.name}
+        ref_cols.discard("")
+        ref_cols.discard("*")
+        unknown_c = ref_cols - prov_cols
+
+        res.update(
+            n_ref_tables=len(ref_tables),
+            n_unknown_tables=len(unknown_t),
+            tables_grounded=(len(unknown_t) == 0),
+            n_ref_columns=len(ref_cols),
+            n_unknown_columns=len(unknown_c),
+            columns_grounded=(len(unknown_c) == 0),
+        )
+        return res
     except Exception:
         return res
-    if tree is None:
-        return res
-    res["parse_valid"] = True
-
-    prov_tables = set(schema.keys())
-    prov_cols = set().union(*schema.values()) if schema else set()
-
-    cte_names = {c.alias_or_name.lower() for c in tree.find_all(exp.CTE) if c.alias_or_name}
-    ref_tables = {(t.name or "").lower() for t in tree.find_all(exp.Table) if t.name}
-    ref_tables -= cte_names
-    ref_tables.discard("")
-    unknown_t = ref_tables - prov_tables
-
-    ref_cols = {(c.name or "").lower() for c in tree.find_all(exp.Column) if c.name}
-    ref_cols.discard("")
-    ref_cols.discard("*")
-    unknown_c = ref_cols - prov_cols
-
-    res.update(
-        n_ref_tables=len(ref_tables),
-        n_unknown_tables=len(unknown_t),
-        tables_grounded=(len(unknown_t) == 0),
-        n_ref_columns=len(ref_cols),
-        n_unknown_columns=len(unknown_c),
-        columns_grounded=(len(unknown_c) == 0),
-    )
-    return res
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
 
 
 def main() -> None:
