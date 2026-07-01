@@ -95,6 +95,8 @@ test = [
 rollouts = [
     "vllm",
     "transformers",
+    "datasets",
+    "sqlglot",
 ]
 
 docs = [
