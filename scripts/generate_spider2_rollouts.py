@@ -337,7 +337,8 @@ def _load_gold_tables(path):
     return out
 
 
-def prepare(data_dir: str, few_shot_k: int, schema_scope: str, top_k: int, gold_tables_path=None):
+def prepare(data_dir: str, few_shot_k: int, schema_scope: str, top_k: int, gold_tables_path=None,
+            shard_id: int = 0, num_shards: int = 1, limit=None, only_ids=None):
     """Load Snow raw fields and build per-instance prompts.
 
     Reads ``spider2-snow.jsonl`` + gold SQL + documents directly (not via
@@ -345,6 +346,10 @@ def prepare(data_dir: str, few_shot_k: int, schema_scope: str, top_k: int, gold_
     slow and unused here). Returns ``(gen_instances, few_shot, pool_ids)``; the
     first ``few_shot_k`` instances form the few-shot pool and are excluded from
     generation (so a question never sees its own gold answer).
+
+    Sharding/only-ids selection happens BEFORE the per-instance schema gather so a
+    task only reads its own shard's DDL -- avoids every task reading the full
+    corpus and thrashing the Lustre metadata server under many concurrent tasks.
     """
     snow = Path(data_dir)
     db_root = snow / "resource" / "databases"
@@ -369,6 +374,17 @@ def prepare(data_dir: str, few_shot_k: int, schema_scope: str, top_k: int, gold_
         return user_message_template(schema, d.utterance, ek)
 
     few_shot = [(um(d), d.query) for idx, d in enumerate(data) if idx in pool_ids]
+
+    # Select this task's instances BEFORE building prompts (the expensive gather).
+    candidates = [(idx, d) for idx, d in enumerate(data) if idx not in pool_ids]
+    if only_ids is not None:
+        want = {int(x) for x in only_ids.split(",")}
+        candidates = [(idx, d) for idx, d in candidates if idx in want]
+    else:
+        candidates = candidates[shard_id::num_shards]
+        if limit is not None:
+            candidates = candidates[:limit]
+
     gen = [
         RolloutInstance(
             spider2_instance_id=d.instance_id,
@@ -377,8 +393,7 @@ def prepare(data_dir: str, few_shot_k: int, schema_scope: str, top_k: int, gold_
             gold=d.query,
             user_message=um(d),
         )
-        for idx, d in enumerate(data)
-        if idx not in pool_ids
+        for idx, d in candidates
     ]
     return gen, few_shot, sorted(pool_ids)
 
@@ -603,13 +618,12 @@ def main() -> None:
     gen, few_shot, pool_ids = prepare(
         args.data_dir, args.few_shot_k, args.schema_scope, args.link_top_k,
         gold_tables_path=args.gold_tables,
+        shard_id=args.shard_id, num_shards=args.num_shards, limit=args.limit,
+        only_ids=args.only_ids,
     )
     if args.only_ids:
-        want = {int(x) for x in args.only_ids.split(",")}
-        gen = [g for g in gen if g.instance_id in want]
         print(f"recovery: {len(gen)} instances {sorted(g.instance_id for g in gen)}", flush=True)
     else:
-        gen = _shard(gen, args.shard_id, args.num_shards, args.limit)
         print(
             f"shard {args.shard_id}/{args.num_shards}: {len(gen)} instances "
             f"(few-shot pool excluded: {pool_ids}); scope={args.schema_scope}; configs={args.models}",
