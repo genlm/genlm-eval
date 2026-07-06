@@ -33,11 +33,12 @@
 set -euo pipefail
 
 # ---- user config ---------------------------------------------------------- #
-NUM_SHARDS=32
+NUM_SHARDS="${NUM_SHARDS:-32}"             # export NUM_SHARDS=4 for a cheap 1/instance ballpark
 DATA_DIR="$SCRATCH/Spider2/spider2-snow"
-OUT_DIR="$SCRATCH/rollouts/snow_bm25"      # reused: completed shards are skipped
-SCHEMA_SCOPE=bm25
-LINK_TOP_K=10
+OUT_DIR="${OUT_DIR:-$SCRATCH/rollouts/snow_bm25}"   # reused: completed shards are skipped
+SCHEMA_SCOPE="${SCHEMA_SCOPE:-bm25}"       # export SCHEMA_SCOPE=oracle for the gold-tables skyline
+LINK_TOP_K="${LINK_TOP_K:-10}"             # export LINK_TOP_K=20 for the k=20 arm
+GOLD_TABLES="${GOLD_TABLES:-}"             # path to spider2-snow-gold-tables.jsonl (oracle scope)
 SAMPLES="${SAMPLES:-100}"                    # nothink samples/instance at t>0
 THINK_SAMPLES="${THINK_SAMPLES:-20}"         # think samples/instance at t>0
 SEED="${SEED:-0}"                            # change for an independent extra batch
@@ -90,6 +91,7 @@ srun python scripts/generate_spider2_rollouts.py \
   --models "$MODEL_SLUG" \
   --schema-scope "$SCHEMA_SCOPE" \
   --link-top-k "$LINK_TOP_K" \
+  --gold-tables "$GOLD_TABLES" \
   --samples "$SAMPLES" \
   --think-samples "$THINK_SAMPLES" \
   --max-tokens "$MAX_TOKENS" \

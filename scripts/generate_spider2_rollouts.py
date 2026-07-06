@@ -61,6 +61,13 @@ SYSTEM_PROMPT = (
     "(tables in the database along with their column names and types) "
     "and asks a complex question about the data that can be solved by issuing a SQL query. "
     "In response, you write the SQL statement that answers the question. "
+    "The database uses case-sensitive identifiers: every table and column name "
+    "must be wrapped in double quotes using the exact case shown in the schema "
+    '(for example, write "full_name", not full_name or FULL_NAME), or the query '
+    "will fail with an invalid-identifier error. "
+    "Always reference a table by its fully qualified three-part name "
+    "database.schema.table (shown in the header above each table's definition), "
+    "not by the table name alone. "
     "You do not provide any commentary or explanation of what the code does, "
     "just the SQL statement ending in a semicolon."
 )
@@ -144,6 +151,7 @@ def build_schema_str(
     gold_sql: str,
     scope: str,
     top_k: int,
+    gold_tables=None,
 ) -> str:
     """Build the schema DDL text for one instance under ``scope``.
 
@@ -152,6 +160,8 @@ def build_schema_str(
     * ``table`` -- only the gold-referenced tables (oracle).
     * ``bm25`` -- top-``top_k`` tables retrieved from the *question* by BM25 over
       each table's (schema, name, DDL) text. Realistic, no gold leak.
+    * ``oracle`` -- exactly the official gold tables (``gold_tables``, a list of
+      ``DB.SCHEMA.TABLE`` names). The retrieval skyline; must be flagged oracle.
     Falls back to the broader set if nothing matches.
     """
     tables = _gather_tables(db_root, db_id)
@@ -170,10 +180,23 @@ def build_schema_str(
         scores = BM25(docs).scores(question)
         order = sorted(range(len(tables)), key=lambda i: scores[i], reverse=True)
         chosen = [tables[i] for i in order[:top_k]]
+    elif scope == "oracle":
+        # match gold "DB.SCHEMA.TABLE" by its (schema, table) suffix against
+        # _gather_tables' (sub_schema, table, ddl) rows.
+        want = set()
+        for gt in gold_tables or []:
+            p = gt.split(".")
+            if len(p) >= 2:
+                want.add((p[-2].lower(), p[-1].lower()))
+        chosen = [r for r in tables if (r[0].lower(), r[1].lower()) in want]
+        if not chosen:  # gold covers all 547; fall back defensively
+            chosen = tables
     else:
         raise ValueError(f"unknown schema scope: {scope}")
 
-    return "\n\n".join(ddl for (_, _, ddl) in chosen)
+    # Prefix each table's DDL with its fully qualified DB.SCHEMA.TABLE name so the
+    # model can follow the three-part-naming instruction (the bare DDL omits it).
+    return "\n\n".join(f"-- {db_id}.{s}.{t}\n{ddl}" for (s, t, ddl) in chosen)
 
 
 def user_message_template(schema_str: str, question: str, external_knowledge=None) -> str:
@@ -189,7 +212,9 @@ def user_message_template(schema_str: str, question: str, external_knowledge=Non
         f"{extra}"
         "Please write me a SQL statement that answers the following question:\n"
         f"{question}\n"
-        "Remember, DO NOT provide any commentary or explanation of what the code does, "
+        "Remember: identifiers are case-sensitive, so double-quote every table and "
+        'column name with the exact case shown in the schema above (e.g. "full_name"). '
+        "DO NOT provide any commentary or explanation of what the code does, "
         "just the SQL statement ending in a semicolon."
     )
 
@@ -254,7 +279,65 @@ class RolloutInstance:
     user_message: str
 
 
-def prepare(data_dir: str, few_shot_k: int, schema_scope: str, top_k: int):
+@dataclass(frozen=True)
+class Spider2Datum:
+    instance_id: str
+    schema_name: str
+    utterance: str
+    query: str
+    external_knowledge: Optional[str] = None
+
+
+def _load_spider2_data(data_filepath: Path, gold_sql_dir: Path):
+    """Inlined from genlm...dialogue (importing the eval framework is a slow cold
+    start off Lustre; this is just a file parser). Accepts Lite (``db``/``question``)
+    and Snow (``db_id``/``instruction``) field names."""
+    data = []
+    with open(data_filepath, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            obj = json.loads(line)
+            gold = ""
+            if gold_sql_dir is not None:
+                p = Path(gold_sql_dir) / f"{obj['instance_id']}.sql"
+                if p.exists():
+                    gold = p.read_text(encoding="utf-8")
+            data.append(
+                Spider2Datum(
+                    instance_id=obj["instance_id"],
+                    schema_name=obj.get("db", obj.get("db_id")),
+                    utterance=obj.get("question", obj.get("instruction")),
+                    query=gold,
+                    external_knowledge=obj.get("external_knowledge"),
+                )
+            )
+    return data
+
+
+def _load_external_knowledge(documents_dir: Path, document_name):
+    if not document_name:
+        return None
+    p = Path(documents_dir) / document_name
+    return p.read_text(encoding="utf-8") if p.exists() else None
+
+
+def _load_gold_tables(path):
+    """{instance_id: [DB.SCHEMA.TABLE, ...]} from the official gold-tables JSONL."""
+    out = {}
+    if not path:
+        return out
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                r = json.loads(line)
+                out[r["instance_id"]] = r.get("gold_tables", [])
+    return out
+
+
+def prepare(data_dir: str, few_shot_k: int, schema_scope: str, top_k: int, gold_tables_path=None):
     """Load Snow raw fields and build per-instance prompts.
 
     Reads ``spider2-snow.jsonl`` + gold SQL + documents directly (not via
@@ -263,27 +346,26 @@ def prepare(data_dir: str, few_shot_k: int, schema_scope: str, top_k: int):
     first ``few_shot_k`` instances form the few-shot pool and are excluded from
     generation (so a question never sees its own gold answer).
     """
-    from genlm.eval.domains.spider2.spider2_eval.dialogue import (
-        load_external_knowledge,
-        load_spider2_data,
-    )
-
     snow = Path(data_dir)
     db_root = snow / "resource" / "databases"
     docs_dir = snow / "resource" / "documents"
-    data = load_spider2_data(
+    data = _load_spider2_data(
         snow / "spider2-snow.jsonl",
         gold_sql_dir=snow / "evaluation_suite" / "gold" / "sql",
     )
     pool_ids = set(range(few_shot_k))
+    gold_map = _load_gold_tables(gold_tables_path)  # only used by --schema-scope oracle
 
     def um(d) -> str:
         ek = (
-            load_external_knowledge(docs_dir, d.external_knowledge)
+            _load_external_knowledge(docs_dir, d.external_knowledge)
             if docs_dir.exists()
             else None
         )
-        schema = build_schema_str(db_root, d.schema_name, d.utterance, d.query, schema_scope, top_k)
+        schema = build_schema_str(
+            db_root, d.schema_name, d.utterance, d.query, schema_scope, top_k,
+            gold_tables=gold_map.get(d.instance_id),
+        )
         return user_message_template(schema, d.utterance, ek)
 
     few_shot = [(um(d), d.query) for idx, d in enumerate(data) if idx in pool_ids]
@@ -318,8 +400,9 @@ def parse_args() -> argparse.Namespace:
         default=[s for _, s, _ in MODELS],
         choices=[s for _, s, _ in MODELS],
     )
-    p.add_argument("--schema-scope", choices=["full", "schema", "table", "bm25"], default="bm25")
+    p.add_argument("--schema-scope", choices=["full", "schema", "table", "bm25", "oracle"], default="bm25")
     p.add_argument("--link-top-k", type=int, default=10, help="Tables to retrieve for --schema-scope bm25.")
+    p.add_argument("--gold-tables", default=None, help="Path to spider2-snow-gold-tables.jsonl (for --schema-scope oracle).")
     p.add_argument("--samples", type=int, default=100, help="Samples/instance at t>0 (nothink).")
     p.add_argument("--think-samples", type=int, default=20, help="Samples/instance at t>0 (think).")
     p.add_argument("--temperatures", type=float, nargs="+", default=DEFAULT_TEMPERATURES)
@@ -518,7 +601,8 @@ def main() -> None:
     os.makedirs(args.out_dir, exist_ok=True)
 
     gen, few_shot, pool_ids = prepare(
-        args.data_dir, args.few_shot_k, args.schema_scope, args.link_top_k
+        args.data_dir, args.few_shot_k, args.schema_scope, args.link_top_k,
+        gold_tables_path=args.gold_tables,
     )
     if args.only_ids:
         want = {int(x) for x in args.only_ids.split(",")}
