@@ -85,7 +85,11 @@ mkdir -p logs "$OUT_DIR"
 echo "task $TASK_ID -> config=$MODEL_SLUG shard=$SHARD_ID/$NUM_SHARDS on $(hostname)"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
-srun python scripts/generate_spider2_rollouts.py \
+# Retry: small models cycle GPUs fast and occasionally hit cudaErrorDevicesUnavailable
+# (GPU not yet released by the prior job) at vLLM init. Retry a few times in-place.
+for attempt in 1 2 3 4; do
+  echo "=== generation attempt $attempt ==="
+  if srun python scripts/generate_spider2_rollouts.py \
   --data-dir "$DATA_DIR" \
   --out-dir "$OUT_DIR" \
   --models "$MODEL_SLUG" \
@@ -105,4 +109,10 @@ srun python scripts/generate_spider2_rollouts.py \
   --run-tag "$RUN_TAG" \
   --tensor-parallel-size "$TP" \
   --gpu-memory-utilization 0.90 \
-  --seed "$SEED"
+  --seed "$SEED"; then
+    echo "=== attempt $attempt succeeded ==="
+    break
+  fi
+  echo "=== attempt $attempt failed (likely transient GPU init); retry in 30s ==="
+  sleep 30
+done

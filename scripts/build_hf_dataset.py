@@ -164,6 +164,9 @@ def main():
     ap.add_argument("--link-top-k", type=int, default=10)
     ap.add_argument("--out", default=None, help="local dir to write parquet (dry build)")
     ap.add_argument("--repo", default=None, help="HF repo id, e.g. user/spider2-snow-temp-sweep")
+    ap.add_argument("--config-name", default="rollouts", help="HF config name for the rollouts (e.g. 'oracle').")
+    ap.add_argument("--schemas-config-name", default="schemas", help="HF config name for the schemas.")
+    ap.add_argument("--skip-schemas", action="store_true", help="Do not build/push the schemas config.")
     ap.add_argument("--push", action="store_true")
     ap.add_argument("--private", action="store_true")
     args = ap.parse_args()
@@ -176,7 +179,7 @@ def main():
     gen = _load_gen_module()
 
     roll = build_rollout_rows(args.rollouts_dir, tok)
-    sch = build_schema_rows(args.data_dir, args.link_top_k, gen)
+    sch = [] if args.skip_schemas else build_schema_rows(args.data_dir, args.link_top_k, gen)
     print(f"rollouts rows: {len(roll)} | schema rows: {len(sch)}", flush=True)
     if roll:
         print("sample rollout row:", {k: (str(v)[:80] if isinstance(v, str) else v) for k, v in roll[0].items()}, flush=True)
@@ -200,7 +203,8 @@ def main():
         raise SystemExit("--out is required (parquet is written first, then pushed)")
     Path(args.out).mkdir(parents=True, exist_ok=True)
     pq.write_table(pa.Table.from_pylist(roll, schema=roll_schema), f"{args.out}/rollouts.parquet")
-    pq.write_table(pa.Table.from_pylist(sch), f"{args.out}/schemas.parquet")
+    if sch:
+        pq.write_table(pa.Table.from_pylist(sch), f"{args.out}/schemas.parquet")
     print(f"wrote parquet to {args.out} (rollouts={len(roll)}, schemas={len(sch)})", flush=True)
 
     if args.push:
@@ -208,10 +212,12 @@ def main():
             raise SystemExit("--push requires --repo")
         from datasets import Dataset
         Dataset.from_parquet(f"{args.out}/rollouts.parquet").push_to_hub(
-            args.repo, config_name="rollouts", private=args.private)
-        Dataset.from_parquet(f"{args.out}/schemas.parquet").push_to_hub(
-            args.repo, config_name="schemas", private=args.private)
-        print(f"pushed to https://huggingface.co/datasets/{args.repo}", flush=True)
+            args.repo, config_name=args.config_name, private=args.private)
+        print(f"pushed '{args.config_name}' to https://huggingface.co/datasets/{args.repo}", flush=True)
+        if sch:
+            Dataset.from_parquet(f"{args.out}/schemas.parquet").push_to_hub(
+                args.repo, config_name=args.schemas_config_name, private=args.private)
+            print(f"pushed '{args.schemas_config_name}'", flush=True)
 
 
 if __name__ == "__main__":
