@@ -36,9 +36,10 @@ def test_clean_row_builds_instance_with_public_hidden_split():
     assert "1 2 3" in inst.question_content
     pub = json.loads(inst.public_eval_sample["input_output"])
     assert pub["inputs"] == ["1 2 3\n"]
-    hid = json.loads(inst.eval_sample["input_output"])
-    assert hid["inputs"] == ["4 5\n", "10\n"]        # example is NOT among hidden tests
-    assert "4 5" not in inst.question_content
+    ev = json.loads(inst.eval_sample["input_output"])
+    # matches the official grading set: ALL tests, public example first (a prefix)
+    assert ev["inputs"] == ["1 2 3\n", "4 5\n", "10\n"]
+    assert "4 5" not in inst.question_content         # non-example tests stay out of the prompt
 
 
 def test_contradictory_tests_drop_the_problem():
@@ -60,8 +61,8 @@ def test_duplicate_identical_tests_are_collapsed_not_dropped():
     ]
     ds = MBPPAgnosticDataset.from_rows([_row(tests=tests)], "ocaml")
     assert len(ds) == 1
-    hid = json.loads(next(iter(ds)).eval_sample["input_output"])
-    assert hid["inputs"] == ["5\n"]
+    ev = json.loads(next(iter(ds)).eval_sample["input_output"])
+    assert ev["inputs"] == ["1 2\n", "5\n"]
 
 
 def test_single_test_problem_dropped():

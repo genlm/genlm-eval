@@ -18,10 +18,12 @@ hard before anything reaches a prompt or an executor:
 Validation is drop-and-count by default (``strict=True`` raises instead); the per-reason drop
 counts are kept on the dataset so a run can assert nothing unexpected was lost.
 
-The first test is embedded in the statement as the worked example, which makes it the PUBLIC
-test both for ``public_eval_sample`` consumers and for verbatim-in-prompt detectors; the rest
-stay hidden. Problems with fewer than 2 tests are dropped so at least one hidden test always
-remains.
+The first test is embedded in the statement as the worked example, matching the official
+framework's prompt construction (``grpo_mbpp.py`` uses ``tests[0]`` as the ``# Examples``
+block). Grading membership also matches the official code and the LCB convention:
+``eval_sample`` holds ALL tests with the public example first (theirs grades
+``test_cases = x["tests"]``), and ``public_eval_sample`` is the example-only prefix.
+Problems with fewer than 2 tests are dropped so at least one non-public test remains.
 """
 
 import json
@@ -194,12 +196,13 @@ class MBPPAgnosticDataset(Dataset[MultilingualLCBInstance]):
                 for d in drops:
                     drop_counts[d] = drop_counts.get(d, 0) + 1
                 continue
-            public, hidden = tests[:1], tests[1:]
+            # public example first so public_eval_sample is a prefix of eval_sample,
+            # and eval_sample carries ALL tests (official grading includes the example)
             rows.append({
                 "question_id": qid,
-                "question_content": _statement(desc, in_fmt, out_fmt, public[0]),
-                "eval_sample": _io_blob(hidden),
-                "public_eval_sample": _io_blob(public),
+                "question_content": _statement(desc, in_fmt, out_fmt, tests[0]),
+                "eval_sample": _io_blob(tests),
+                "public_eval_sample": _io_blob(tests[:1]),
             })
         return cls(rows, language, drop_counts)
 
