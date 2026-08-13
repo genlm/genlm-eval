@@ -1,6 +1,5 @@
-"""Validation behaviour of the Ag-MBPP-X loader: every drop reason, dedup, and the
-public/hidden split. Fixtures are inline so CI never touches the network; the pinned-revision
-HF load is exercised separately (network-marked)."""
+"""Validation behaviour of the Ag-MBPP-X loader. Fixtures are inline; the pinned-revision
+HF load is network-marked."""
 
 import json
 
@@ -37,7 +36,7 @@ def test_clean_row_builds_instance_with_public_hidden_split():
     pub = json.loads(inst.public_eval_sample["input_output"])
     assert pub["inputs"] == ["1 2 3\n"]
     ev = json.loads(inst.eval_sample["input_output"])
-    # matches the official grading set: ALL tests, public example first (a prefix)
+    # official grading set: all tests, public example first
     assert ev["inputs"] == ["1 2 3\n", "4 5\n", "10\n"]
     assert "4 5" not in inst.question_content         # non-example tests stay out of the prompt
 

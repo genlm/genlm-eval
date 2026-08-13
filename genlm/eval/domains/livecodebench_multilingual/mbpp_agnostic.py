@@ -1,29 +1,10 @@
 """Ag-MBPP-X (nuprl/mbpp-agnostic-translation) as a multilingual stdin/stdout eval set.
 
-The Agnostics group rewrote MBPP's assert-based tasks into language-agnostic problems with
-stdin/stdout I/O tests. That makes them a drop-in OUT-OF-DOMAIN eval for the multilingual-LCB
-harness: MBPP upstream, so zero Codeforces overlap with the LCB split.
-
-The rows are LLM-generated, so this loader treats the dataset as UNTRUSTED input and validates
-hard before anything reaches a prompt or an executor:
-
-  * the HF revision is pinned; a moved dataset cannot silently change the eval
-  * schema, size and character checks on every field (control characters, oversized tests,
-    empty I/O), with a scan for prompt-injection markers in the text fields
-  * contradictory tests (same input, different expected output) drop the whole problem: for
-    LLM-generated tests this is the signature of a broken row, and one bad hidden test would
-    silently misgrade every model on that problem
-  * exact and normalized-text dedup, so repeated problems cannot double-weight the metric
-
-Validation is drop-and-count by default (``strict=True`` raises instead); the per-reason drop
-counts are kept on the dataset so a run can assert nothing unexpected was lost.
-
-The first test is embedded in the statement as the worked example, matching the official
-framework's prompt construction (``grpo_mbpp.py`` uses ``tests[0]`` as the ``# Examples``
-block). Grading membership also matches the official code and the LCB convention:
-``eval_sample`` holds ALL tests with the public example first (theirs grades
-``test_cases = x["tests"]``), and ``public_eval_sample`` is the example-only prefix.
-Problems with fewer than 2 tests are dropped so at least one non-public test remains.
+MBPP tasks rewritten by the Agnostics group into stdin/stdout form: an out-of-domain
+companion to the LCB problems, with no Codeforces overlap. The rows are LLM-generated, so
+the loader pins the HF revision and validates every row before use; see from_rows() for the
+checks and drop accounting. Prompt construction and grading membership follow the official
+framework (tests[0] is the in-prompt example; eval_sample grades all tests, example first).
 """
 
 import json
@@ -33,15 +14,14 @@ from typing import Any, Dict, Iterator, List, Mapping, Optional, Tuple, Type
 from .dataset import Dataset, MultilingualLCBInstance, resolve_language
 
 HF_REPO = "nuprl/mbpp-agnostic-translation"
-# a32a76f = 2026-03-13, the revision the validation numbers below were measured on
+# a32a76f, 2026-03-13: the revision the validation numbers were measured on
 PINNED_REVISION = "a32a76fa8a7ae4b6b2eeee31e086d1b33635940c"
 
 MAX_TEXT_CHARS = 20_000       # description + format prose
 MAX_IO_CHARS = 65_536         # any single test input or output
 MAX_TESTS = 200
 
-# Narrow, high-precision markers. These do not occur in legitimate MBPP-style problem prose;
-# anything matching is treated as a poisoned row, not a false positive to argue with.
+# Narrow markers that never occur in legitimate problem prose; a match drops the row.
 _INJECTION = re.compile(
     r"(ignore (all )?(previous|prior) (instructions|messages)"
     r"|disregard (the|all|your) (system|previous|prior)"
@@ -99,8 +79,7 @@ def _check_tests(raw: Any, drops: List[str]) -> Optional[List[Tuple[str, str]]]:
         prev = seen.get(key)
         if prev is not None:
             if prev.strip() != out.strip():
-                # contradictory expectations for the same input: the row is broken and any
-                # grading against it is noise at best
+                # same input, different expected output: the row is broken
                 drops.append("tests:contradictory")
                 return None
             continue  # exact duplicate test: keep one copy
@@ -129,8 +108,8 @@ def _io_blob(tests: List[Tuple[str, str]]) -> Dict[str, str]:
 class MBPPAgnosticDataset(Dataset[MultilingualLCBInstance]):
     """Ag-MBPP-X problems for one target language, validated and deduplicated.
 
-    Instances carry ``platform='mbpp-agnostic'`` and ``question_id='mbppx_<task_id>'`` so
-    nothing downstream can confuse them with LCB problems or leak them into an LCB split.
+    ``platform='mbpp-agnostic'`` and ``question_id='mbppx_<task_id>'`` keep instances
+    distinguishable from LCB problems.
     """
 
     def __init__(self, rows: List[Mapping[str, Any]], language: str,
@@ -166,7 +145,9 @@ class MBPPAgnosticDataset(Dataset[MultilingualLCBInstance]):
     @classmethod
     def from_rows(cls, raw_rows: List[Mapping[str, Any]], language: str,
                   *, strict: bool = False) -> "MBPPAgnosticDataset":
-        """Validate raw dataset rows; see the module docstring for the checks applied."""
+        """Validate raw rows: schema, size and character checks, an injection-marker scan,
+        contradictory-test detection, and dedup by task id and normalized description.
+        Failing rows are dropped and counted in ``drop_counts`` (``strict=True`` raises)."""
         rows: List[Dict[str, Any]] = []
         drop_counts: Dict[str, int] = {}
         seen_ids: set = set()
@@ -196,8 +177,8 @@ class MBPPAgnosticDataset(Dataset[MultilingualLCBInstance]):
                 for d in drops:
                     drop_counts[d] = drop_counts.get(d, 0) + 1
                 continue
-            # public example first so public_eval_sample is a prefix of eval_sample,
-            # and eval_sample carries ALL tests (official grading includes the example)
+            # eval_sample carries all tests, example first, so public_eval_sample is a
+            # prefix and grading matches the official framework
             rows.append({
                 "question_id": qid,
                 "question_content": _statement(desc, in_fmt, out_fmt, tests[0]),
