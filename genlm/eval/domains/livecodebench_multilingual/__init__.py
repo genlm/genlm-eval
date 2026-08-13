@@ -6,6 +6,7 @@ from .dataset import (
     resolve_language,
 )
 from .capture import capture_run
+from .mbpp_agnostic import MBPPAgnosticDataset
 from .evaluator import MultilingualLCBEvaluator
 from .executor import (
     LocalSubprocessExecutor,
@@ -23,6 +24,7 @@ from .prompts import (
 )
 
 __all__ = [
+    "MBPPAgnosticDataset",
     "MultilingualLCBInstance",
     "MultilingualLCBDataset",
     "MultilingualLCBEvaluator",

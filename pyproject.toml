@@ -117,4 +117,5 @@ extend-exclude = [
 pythonpath = ["tests"]
 markers = [
     "differential: needs the ../Multi-LCB repo for differential grading",
+    "network: hits external services (HF hub); deselect with -m 'not network'",
 ]
