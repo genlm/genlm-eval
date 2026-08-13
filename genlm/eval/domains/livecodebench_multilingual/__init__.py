@@ -24,6 +24,7 @@ from .prompts import (
 )
 
 __all__ = [
+    "MBPPAgnosticDataset",
     "MultilingualLCBInstance",
     "MultilingualLCBDataset",
     "MultilingualLCBEvaluator",
