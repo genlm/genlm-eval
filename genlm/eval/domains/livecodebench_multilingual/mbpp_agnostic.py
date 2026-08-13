@@ -1,8 +1,9 @@
 """Ag-MBPP-X (nuprl/mbpp-agnostic-translation) as a multilingual stdin/stdout eval set.
 
 MBPP tasks rewritten by the Agnostics group into stdin/stdout form: an out-of-domain
-companion to the LCB problems, with no Codeforces overlap. The rows are LLM-generated, so
-the loader pins the HF revision and validates every row before use; see from_rows() for the
+companion to the LCB problems, with no Codeforces overlap. Rows were reformulated from MBPP
+by Qwen3-32B (paper appendix), including the test I/O values, with no execution verification,
+so the loader pins the HF revision and validates every row; see from_rows() for the
 checks and drop accounting. Prompt construction and grading membership follow the official
 framework (tests[0] is the in-prompt example; eval_sample grades all tests, example first).
 """
