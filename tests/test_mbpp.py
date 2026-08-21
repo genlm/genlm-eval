@@ -29,9 +29,18 @@ SYNTAX_ERR = "def add(a, b) return a + b\n"            # does not parse
 def test_extract_code_fenced_and_plain():
     assert extract_code("```python\n" + CORRECT + "```") == CORRECT.strip()
     assert extract_code(CORRECT) == CORRECT.strip()
-    # last fence wins; reasoning before </think> is dropped
+    # reasoning before </think> is dropped
     txt = "<think>```python\nx=1\n```</think>\nhere:\n```python\n" + CORRECT + "```"
     assert extract_code(txt) == CORRECT.strip()
+
+
+def test_extract_code_skips_trailing_usage_block():
+    # Solution first, then a SECOND block with example asserts (no def): take the solution.
+    out = (
+        "Here's the function:\n```python\n" + CORRECT + "```\n\n"
+        "Testing:\n```python\nassert add(2, 3) == 5\nassert add(-1, 1) == 0\n```"
+    )
+    assert extract_code(out) == CORRECT.strip()
 
 
 def test_extract_code_prefix_handles_open_fence():

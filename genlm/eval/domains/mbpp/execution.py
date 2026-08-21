@@ -50,21 +50,35 @@ _MARKER = "__MBPP_RESULT__"
 
 _FENCE = re.compile(r"```(?:python|py)?\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
 _OPEN_FENCE = re.compile(r"```(?:python|py)?\s*\n", re.IGNORECASE)
+# A block that actually defines something (vs a trailing usage/assert-example block).
+_DEFINES = re.compile(r"(?m)^\s*(?:async\s+def|def|class)\s")
+
+
+def _pick_solution_block(blocks: List[str]) -> str:
+    """Choose the solution among fenced blocks.
+
+    Models frequently emit the solution first and then a SECOND block with example
+    ``assert``/usage lines (no definition). Prefer the last block that defines a
+    function/class; fall back to the last block if none define anything.
+    """
+    def_blocks = [b for b in blocks if _DEFINES.search(b)]
+    return (def_blocks[-1] if def_blocks else blocks[-1]).strip()
 
 
 def extract_code(text: str) -> str:
     """Extract the Python solution from a full model output.
 
-    Returns the last fenced ```python block if present, otherwise the stripped text.
-    Reasoning traces (``<think>...</think>``) are dropped so code fenced inside the
-    reasoning is never mistaken for the answer.
+    Returns the fenced ```python block that defines the solution (the last block
+    containing a def/class, skipping trailing usage/assert blocks); if there are no
+    fenced blocks, the stripped text. Reasoning traces (``<think>...</think>``) are
+    dropped so code fenced inside the reasoning is never mistaken for the answer.
     """
     text = text or ""
     if "</think>" in text:
         text = text.rsplit("</think>", 1)[1]
     blocks = _FENCE.findall(text)
     if blocks:
-        return blocks[-1].strip()
+        return _pick_solution_block(blocks)
     return text.strip()
 
 
@@ -79,7 +93,7 @@ def extract_code_prefix(text: str) -> str:
         text = text.rsplit("</think>", 1)[1]
     blocks = _FENCE.findall(text)
     if blocks:
-        return blocks[-1].strip()
+        return _pick_solution_block(blocks)
     opens = list(_OPEN_FENCE.finditer(text))
     if opens:
         return text[opens[-1].end():]
