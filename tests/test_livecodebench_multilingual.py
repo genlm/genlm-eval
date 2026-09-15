@@ -31,6 +31,11 @@ from genlm.eval.domains.livecodebench_multilingual import (
 )
 from genlm.eval.domains.livecodebench_multilingual import capture as mlcb_capture
 from genlm.eval.domains.livecodebench_multilingual.capture import _rec
+from genlm.eval.domains.livecodebench_multilingual.errata import (
+    ERRATA,
+    ERRATA_UPSTREAM,
+    ERRATA_VERIFIED,
+)
 from genlm.eval.domains.livecodebench_multilingual.executor import _TOOLCHAIN
 from genlm.eval.domains.livecodebench_multilingual.vendored import testing_plang
 from genlm.eval.domains.livecodebench_multilingual.vendored.testing_plang import (
@@ -84,6 +89,29 @@ def test_dataset_is_stdin_only_with_composite_id():
         assert i.language == "c++"
         assert i.instance_id == f"{i.question_id}@c++"
         assert isinstance(i, MultilingualLCBInstance)
+
+
+def test_errata_problems_are_dropped_by_default():
+    rows = [
+        {"question_id": "abc333_a", "testtype": "stdin"},
+        {"question_id": "abc337_e", "testtype": "stdin"},  # interactive, upstream errata
+        {"question_id": "arc192_b", "testtype": "stdin"},  # erroneous tests, verified here
+    ]
+    kept = [i.question_id for i in MultilingualLCBDataset(rows, "c++")]
+    assert kept == ["abc333_a"]
+
+    all_ids = [i.question_id for i in MultilingualLCBDataset(rows, "c++", keep_errata=True)]
+    assert all_ids == ["abc333_a", "abc337_e", "arc192_b"]
+
+
+def test_errata_lists_are_disjoint_and_categorised():
+    assert not set(ERRATA_UPSTREAM) & set(ERRATA_VERIFIED)
+    assert set(ERRATA) == set(ERRATA_UPSTREAM) | set(ERRATA_VERIFIED)
+    assert set(ERRATA.values()) <= {
+        "multiple-solutions",
+        "interactive",
+        "erroneous-tests",
+    }
 
 
 def test_dataset_validates_language():
@@ -371,6 +399,30 @@ def test_exact_grading_is_stricter_than_lenient():
         MultilingualLCBEvaluator(grading="exact").evaluate_sample(inst, good).score
         == 1.0
     )
+
+
+def test_float_accepts_relative_error_on_large_magnitudes():
+    # abc375_b: the absolute error is 0.11 and the relative error is 4e-15. The problem
+    # allows either, so this must pass.
+    scores, _ = testing_plang.match_tests_groud_truth(
+        ["27668169958335.52343750000000000000"],
+        ["in"],
+        ["27668169958335.63809169231721161667"],
+    )
+    assert all(s.value > 0 for s in scores)
+
+
+def test_float_still_rejects_genuinely_wrong_answers():
+    scores, _ = testing_plang.match_tests_groud_truth(["1.5"], ["in"], ["2.5"])
+    assert not all(s.value > 0 for s in scores)
+
+
+def test_integers_are_not_given_relative_tolerance():
+    # Two large integers one apart fall inside the relative tolerance and are still wrong.
+    scores, _ = testing_plang.match_tests_groud_truth(
+        ["1000000000000001"], ["in"], ["1000000000000000"]
+    )
+    assert not all(s.value > 0 for s in scores)
 
 
 def test_invalid_grading_raises():

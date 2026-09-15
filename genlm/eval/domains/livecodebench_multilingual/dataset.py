@@ -16,6 +16,8 @@ from genlm.eval.domains.livecodebench.livecodebench import (
     LiveCodeBenchInstance,
 )
 
+from .errata import drop_errata
+
 _STDIN_ONLY = ("stdin",)
 
 
@@ -147,9 +149,16 @@ class MultilingualLCBInstance(LiveCodeBenchInstance):
 class MultilingualLCBDataset(Dataset[MultilingualLCBInstance]):
     """LiveCodeBench stdin problems for a single target language."""
 
-    def __init__(self, rows: List[Mapping[str, Any]], language: str):
+    def __init__(
+        self,
+        rows: List[Mapping[str, Any]],
+        language: str,
+        *,
+        keep_errata: bool = False,
+    ):
+        """``keep_errata=True`` keeps the unscoreable problems listed in ``errata.py``."""
         self.language = resolve_language(language).key
-        self._rows = list(rows)
+        self._rows = list(rows) if keep_errata else drop_errata(rows)
 
     def __len__(self) -> int:
         return len(self._rows)
@@ -198,11 +207,13 @@ class MultilingualLCBDataset(Dataset[MultilingualLCBInstance]):
         max_tests_per_problem: Optional[int] = None,
         cumulative: bool = True,
         cache_dir: Optional[str] = None,
+        keep_errata: bool = False,
     ) -> "MultilingualLCBDataset":
         """Load stdin LiveCodeBench problems for ``language`` (testtypes forced to stdin).
 
         ``start_date`` defaults to the base loader's ``2024-01-01``; pass the paper's window
-        (e.g. ``None`` or ``'2024-07-01'``) to match a specific problem set.
+        (e.g. ``None`` or ``'2024-07-01'``) to match a specific problem set. Unscoreable
+        problems are dropped; pass ``keep_errata=True`` to keep them.
         """
         resolve_language(language)  # validate early
         base = LiveCodeBenchDataset.from_hf(
@@ -220,7 +231,7 @@ class MultilingualLCBDataset(Dataset[MultilingualLCBInstance]):
             cumulative=cumulative,
             cache_dir=cache_dir,
         )
-        return cls(base._rows, language)
+        return cls(base._rows, language, keep_errata=keep_errata)
 
     @classmethod
     def from_jsonl(
@@ -236,6 +247,7 @@ class MultilingualLCBDataset(Dataset[MultilingualLCBInstance]):
         seed: int = 12345,
         shuffle: bool = False,
         max_instances: Optional[int] = None,
+        keep_errata: bool = False,
     ) -> "MultilingualLCBDataset":
         """Load stdin problems from a snapshot JSONL for ``language`` (testtypes forced)."""
         resolve_language(language)
@@ -251,4 +263,4 @@ class MultilingualLCBDataset(Dataset[MultilingualLCBInstance]):
             shuffle=shuffle,
             max_instances=max_instances,
         )
-        return cls(base._rows, language)
+        return cls(base._rows, language, keep_errata=keep_errata)
