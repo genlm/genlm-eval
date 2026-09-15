@@ -31,6 +31,11 @@ from genlm.eval.domains.livecodebench_multilingual import (
 )
 from genlm.eval.domains.livecodebench_multilingual import capture as mlcb_capture
 from genlm.eval.domains.livecodebench_multilingual.capture import _rec
+from genlm.eval.domains.livecodebench_multilingual.errata import (
+    ERRATA,
+    ERRATA_UPSTREAM,
+    ERRATA_VERIFIED,
+)
 from genlm.eval.domains.livecodebench_multilingual.executor import _TOOLCHAIN
 from genlm.eval.domains.livecodebench_multilingual.vendored import testing_plang
 from genlm.eval.domains.livecodebench_multilingual.vendored.testing_plang import (
@@ -84,6 +89,29 @@ def test_dataset_is_stdin_only_with_composite_id():
         assert i.language == "c++"
         assert i.instance_id == f"{i.question_id}@c++"
         assert isinstance(i, MultilingualLCBInstance)
+
+
+def test_errata_problems_are_dropped_by_default():
+    rows = [
+        {"question_id": "abc333_a", "testtype": "stdin"},
+        {"question_id": "abc337_e", "testtype": "stdin"},  # interactive, upstream errata
+        {"question_id": "arc192_b", "testtype": "stdin"},  # erroneous tests, verified here
+    ]
+    kept = [i.question_id for i in MultilingualLCBDataset(rows, "c++")]
+    assert kept == ["abc333_a"]
+
+    all_ids = [i.question_id for i in MultilingualLCBDataset(rows, "c++", keep_errata=True)]
+    assert all_ids == ["abc333_a", "abc337_e", "arc192_b"]
+
+
+def test_errata_lists_are_disjoint_and_categorised():
+    assert not set(ERRATA_UPSTREAM) & set(ERRATA_VERIFIED)
+    assert set(ERRATA) == set(ERRATA_UPSTREAM) | set(ERRATA_VERIFIED)
+    assert set(ERRATA.values()) <= {
+        "multiple-solutions",
+        "interactive",
+        "erroneous-tests",
+    }
 
 
 def test_dataset_validates_language():
