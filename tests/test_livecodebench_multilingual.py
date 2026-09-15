@@ -401,6 +401,30 @@ def test_exact_grading_is_stricter_than_lenient():
     )
 
 
+def test_float_accepts_relative_error_on_large_magnitudes():
+    # abc375_b: the absolute error is 0.11 and the relative error is 4e-15. The problem
+    # allows either, so this must pass.
+    scores, _ = testing_plang.match_tests_groud_truth(
+        ["27668169958335.52343750000000000000"],
+        ["in"],
+        ["27668169958335.63809169231721161667"],
+    )
+    assert all(s.value > 0 for s in scores)
+
+
+def test_float_still_rejects_genuinely_wrong_answers():
+    scores, _ = testing_plang.match_tests_groud_truth(["1.5"], ["in"], ["2.5"])
+    assert not all(s.value > 0 for s in scores)
+
+
+def test_integers_are_not_given_relative_tolerance():
+    # Two large integers one apart fall inside the relative tolerance and are still wrong.
+    scores, _ = testing_plang.match_tests_groud_truth(
+        ["1000000000000001"], ["in"], ["1000000000000000"]
+    )
+    assert not all(s.value > 0 for s in scores)
+
+
 def test_invalid_grading_raises():
     with pytest.raises(ValueError, match="grading must be"):
         LocalSubprocessExecutor(grading="fuzzy")

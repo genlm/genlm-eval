@@ -1310,6 +1310,24 @@ def eval_plang_code(
     return all_results, SuccessRunMeta(execution_time=total_exec_time)
 
 
+def _is_float_literal(token: str) -> bool:
+    """True if the token was written as a float (has a point or an exponent)."""
+    return "." in token or "e" in token or "E" in token
+
+
+def _tokens_match(pred_token, gt_token, pred_value, gt_value, epsilon) -> bool:
+    """genlm-eval edit: compare one output token against its expected value.
+
+    Integers must match exactly. Floats are accepted when either the absolute or the relative
+    error is within ``epsilon``, the tolerance the problem statements specify. The relative
+    test is needed because an output of large magnitude carries an absolute error above
+    ``epsilon`` while still being correct to the requested precision.
+    """
+    if not (_is_float_literal(pred_token) or _is_float_literal(gt_token)):
+        return pred_value == gt_value
+    return isclose(pred_value, gt_value, abs_tol=epsilon, rel_tol=epsilon)
+
+
 def match_tests_groud_truth(
     code_outputs: List[str], input_data: List[str], output_data: List[str]
 ) -> Tuple[EvalScores, WrongAnswerMeta | SuccessRunMeta]:
@@ -1392,12 +1410,14 @@ def match_tests_groud_truth(
 
             if len(decimal_prediction_line) == len(decimal_gtout_line):
                 # check all Decimals are close
-
                 all_good = all(
-                    [
-                        isclose(a, b, abs_tol=epsilon, rel_tol=0)
-                        for a, b in zip(decimal_prediction_line, decimal_gtout_line)
-                    ]
+                    _tokens_match(pt, gt, a, b, epsilon)
+                    for pt, gt, a, b in zip(
+                        stripped_prediction_line.split(),
+                        stripped_gt_out_line.split(),
+                        decimal_prediction_line,
+                        decimal_gtout_line,
+                    )
                 )
 
                 if all_good:
