@@ -235,7 +235,10 @@ def goal_default_prompt_formatter(
             {"role": "assistant", "content": instance.prefix_pddl},
         ]
         return tokenizer.apply_chat_template(
-            conversation=messages, tokenize=True, add_generation_prompt=True
+            conversation=messages,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_dict=False,
         )
 
     prompt = (
