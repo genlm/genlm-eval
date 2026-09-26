@@ -110,7 +110,7 @@ async def test_potential():
 
 
 def test_run_evaluation(mol_dataset, mol_evaluator):
-    LLM = PromptedLLM.from_name("gpt2", backend="hf")
+    LLM = PromptedLLM.from_name("openai-community/gpt2", backend="hf")
 
     def sampler_factory(instance):
         LLM.prompt_ids = default_prompt_formatter(LLM.model.tokenizer, instance)
