@@ -88,7 +88,9 @@ def test_evaluator(dataset, evaluator):
 
 
 def test_run_evaluation(dataset, evaluator):
-    LLM = PromptedLLM.from_name("gpt2", backend="hf", eos_tokens=[b"\n", b"\n\n"])
+    LLM = PromptedLLM.from_name(
+        "openai-community/gpt2", backend="hf", eos_tokens=[b"\n", b"\n\n"]
+    )
 
     def sampler_factory(instance):
         LLM.prompt_ids = default_prompt_formatter(

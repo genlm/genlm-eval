@@ -84,7 +84,9 @@ def test_spider_evaluator(spider_dataset, spider_evaluator):
 
 
 def test_run_evaluation(spider_dataset, spider_evaluator):
-    LLM = PromptedLLM.from_name("gpt2", backend="hf", eos_tokens=[b"\n", b"\n\n"])
+    LLM = PromptedLLM.from_name(
+        "openai-community/gpt2", backend="hf", eos_tokens=[b"\n", b"\n\n"]
+    )
 
     def sampler_factory(instance):
         LLM.prompt_ids = default_prompt_formatter(
