@@ -191,6 +191,7 @@ def default_prompt_formatter(
             ),
             tokenize=True,
             add_generation_prompt=True,
+            return_dict=False,
         )
     else:
         return tokenizer.encode(
