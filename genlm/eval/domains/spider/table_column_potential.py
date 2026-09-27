@@ -10,7 +10,7 @@ class SpiderTableColumnVerifier(Potential):
         from lark import Lark
 
         self.parser = Lark(grammar)
-        self.tables = tables
+        self.schema_tables = tables
         self.verbosity = verbosity
 
         super().__init__(list(range(256)))
@@ -40,7 +40,7 @@ class SpiderTableColumnVerifier(Potential):
         return None
 
     def _validate(self, parsed):
-        validator = ColumnValidator(self.tables, self.verbosity)
+        validator = ColumnValidator(self.schema_tables, self.verbosity)
         try:
             validator.transform(parsed)
             return 0 if validator.is_valid else float("-inf")
